@@ -79,7 +79,7 @@ def check_logs_health(filepath: str = "logs/game_logs.jsonl"):
                 heatmaps_by_size[size] = (np.zeros((size + 1, size), dtype=int), np.zeros((size, size + 1), dtype=int))
             h_heatmap, v_heatmap = heatmaps_by_size[size]
             
-            for move in moves:
+            for move in moves[:10]:
                 h_dummy, v_dummy = np.zeros(game.N_LINES), np.zeros(game.N_LINES)
                 h_dummy[move] = 1
                 h, v = game.l_to_h_v(h_dummy)
