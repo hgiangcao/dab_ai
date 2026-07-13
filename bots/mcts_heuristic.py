@@ -1,133 +1,222 @@
-import copy
+"""
+MCTS with pure UCT (Upper Confidence bounds applied to Trees):
+- No deepcopy: single shared game state walked with execute_move / undo_move
+- Traditional Monte Carlo rollouts (no neural networks)
+- Stores only MCTS statistics in AZNode
+"""
 import math
+import random
+import sys
+import os
 import numpy as np
 from agent_interface import BaseAgent
 
-class AZNode:
-    def __init__(self, parent, s, a: int):
-        self.a = a
-        self.s = s
-        self.children = []
-        self.Q = {}
-        self.N = {}
-        self.P = None
-        if parent is not None:
-            parent.children.append(self)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lookup_board import ZobristHash
 
-    def get_child_by_move(self, a: int):
-        for child in self.children:
-            if child.a == a:
-                return child
-        return None
+
+# ---------------------------------------------------------------------------
+# MCTS Tree Node
+# ---------------------------------------------------------------------------
+
+class AZNode:
+    """
+    Stores UCT statistics for one board position.
+    """
+    __slots__ = ('a', 'hash_val', 'parent', 'children', 'Q', 'N', 'unvisited_moves', 'is_expanded')
+
+    def __init__(self, parent, a: int, hash_val: int = 0, valid_moves: list = None):
+        self.a        = a          # action that led to this node
+        self.hash_val = hash_val   # Zobrist hash of this node's board state
+        self.parent   = parent
+        self.children: dict = {}   # action -> AZNode
+        self.Q: dict  = {}         # action -> Q-value (from perspective of player who moves AT this node)
+        self.N: dict  = {}         # action -> visit count
+        self.unvisited_moves = list(valid_moves) if valid_moves is not None else []
+        self.is_expanded = False
+
+    def get_child(self, a: int):
+        return self.children.get(a, None)
+
+
+# ---------------------------------------------------------------------------
+# MCTS Engine (Pure UCT)
+# ---------------------------------------------------------------------------
 
 class MCTS:
-    def __init__(self, model, mcts_parameters: dict):
-        self.model = model
-        self.n_simulations = mcts_parameters["n_simulations"]
-        self.c_puct = mcts_parameters["c_puct"]
-        self.dirichlet_eps = mcts_parameters["dirichlet_eps"]
-        self.dirichlet_alpha = mcts_parameters["dirichlet_alpha"]
+    def __init__(self, mcts_parameters: dict):
+        self.n_simulations  = mcts_parameters["n_simulations"]
+        self.c_puct         = mcts_parameters.get("c_puct", 1.0) # exploration constant
 
     def play(self, game_state, temp: int) -> list:
-        root = AZNode(parent=None, s=copy.deepcopy(game_state), a=None)
-        valid_moves = root.s.get_valid_moves()
-        
-        dirichlet_noise = np.zeros((root.s.N_LINES,), dtype=np.float32)
-        if len(valid_moves) > 0:
-            dirichlet_noise[valid_moves] = np.random.dirichlet([self.dirichlet_alpha] * len(valid_moves))
+        # Zobrist hash for transposition table lookups
+        zobrist   = ZobristHash(game_state.N_LINES)
+        root_hash = zobrist.compute_initial_hash(game_state.l)
 
+        root = AZNode(parent=None, a=None, hash_val=root_hash, valid_moves=game_state.get_valid_moves())
+
+        # run UCT simulations (no timeout cap to ensure MCTS 1000 runs 1000 simulations)
         for _ in range(self.n_simulations):
-            self.search(root, is_root=True, dirichlet_noise=dirichlet_noise)
+            self._search(game_state, root, zobrist)
 
-        counts = [root.N[a] if a in root.N else 0 for a in range(root.s.N_LINES)]
+        # Build probability distribution based on visit counts
+        counts = [root.N.get(a, 0) for a in range(game_state.N_LINES)]
+        total_counts = sum(counts)
+
+        if total_counts == 0:
+            probs = [0.0] * game_state.N_LINES
+            valid_moves = game_state.get_valid_moves()
+            if valid_moves:
+                u = 1.0 / len(valid_moves)
+                for a in valid_moves:
+                    probs[a] = u
+            return probs
 
         if temp == 0:
             probs = [0] * len(counts)
-            probs[np.array(counts).argmax()] = 1
+            probs[int(np.argmax(counts))] = 1
             return probs
 
-        probs = [n ** (1. / temp) for n in counts]
+        probs     = [n ** (1.0 / temp) for n in counts]
         total_sum = float(sum(probs))
-        probs = [p / total_sum for p in probs] if total_sum > 0 else [1.0/len(probs)] * len(probs)
+        if total_sum > 0:
+            probs = [p / total_sum for p in probs]
+        else:
+            probs = [1.0 / len(probs)] * len(probs)
         return probs
 
-    def search(self, node: AZNode, is_root: bool = False, dirichlet_noise: np.ndarray = None) -> float:
-        if not node.s.is_running():
-            result = node.s.result
-            if node.s.current_player == result:
+    def _search(self, s, node: AZNode, zobrist: ZobristHash) -> float:
+        """
+        Runs a single UCT simulation step: selection, expansion, simulation, backpropagation.
+        Returns value from the perspective of the current player of s.
+        """
+        if not s.is_running():
+            result = s.result
+            if s.current_player == result:
                 return 1.0
             return 0.0 if result == 0 else -1.0
 
-        if node.P is None:
-            h, v = node.s.l_to_h_v(node.s.get_canonical_lines())
-            p1_boxes = np.where(node.s.get_canonical_boxes() == 1, 1.0, 0.0)
-            p2_boxes = np.where(node.s.get_canonical_boxes() == -1, 1.0, 0.0)
+        # --- Expansion ---
+        if node.unvisited_moves:
+            # Expand one unvisited action
+            a = node.unvisited_moves.pop(random.randrange(len(node.unvisited_moves)))
             
-            stacked_board = np.stack([h[:-1, :], v[:, :-1], p1_boxes, p2_boxes], axis=0)
-            p, v_val = self.model.predict(stacked_board)
-            node.P = p
+            # Recurse: apply move, compute child hash, simulate/rollout, undo
+            player_before = s.current_player
+            s.execute_move(a)
+            player_switched = (s.current_player != player_before)
+            
+            child_hash = zobrist.update_hash(node.hash_val, a)
+            child = AZNode(parent=node, a=a, hash_val=child_hash, valid_moves=s.get_valid_moves())
+            node.children[a] = child
+            
+            # Rollout simulation at leaf
+            v_child = self._rollout(s)
+            
+            # Undo move to restore state
+            s.undo_move()
+            
+            v_val = v_child if not player_switched else -v_child
+            
+            # Backup statistics
+            node.N[a] = 1
+            node.Q[a] = v_val
             return v_val
 
-        a = self.select(node, is_root, dirichlet_noise)
-        child = node.get_child_by_move(a)
-        
-        if child is None:
-            child = self.expand(node, a)
+        # --- Selection ---
+        a = self._select(node, s.get_valid_moves())
+        child = node.get_child(a)
 
-        v_child = self.search(child, is_root=False, dirichlet_noise=None)
-        v_val = v_child if node.s.current_player == child.s.current_player else -v_child
+        player_before = s.current_player
+        s.execute_move(a)
+        player_switched = (s.current_player != player_before)
 
-        self.backup(node, a, v_val)
+        v_child = self._search(s, child, zobrist)
+        s.undo_move()
+
+        v_val = v_child if not player_switched else -v_child
+
+        # --- Backup ---
+        n = node.N[a]
+        node.Q[a] = (n * node.Q[a] + v_val) / (n + 1)
+        node.N[a] = n + 1
+
         return v_val
 
-    def select(self, node: AZNode, is_root: bool, dirichlet_noise: np.ndarray) -> int:
-        maximum = float('-inf')
-        a_max = -1
-        N_sum = sum(node.N.values())
-        N_sqrt = math.sqrt(N_sum) if N_sum > 0 else 1
+    def _select(self, node: AZNode, valid_moves: list) -> int:
+        N_sum  = sum(node.N.values())
+        log_N = math.log(N_sum) if N_sum > 0 else 0.0
 
-        P = node.P if not is_root else (1 - self.dirichlet_eps) * node.P + self.dirichlet_eps * dirichlet_noise
+        best_score = float('-inf')
+        best_a     = valid_moves[0]
+        for a in valid_moves:
+            q = node.Q.get(a, 0.0)
+            n = node.N.get(a, 0)
+            if n == 0:
+                score = float('inf')
+            else:
+                score = q + self.c_puct * math.sqrt(log_N / n)
+            if score > best_score:
+                best_score = score
+                best_a     = a
+        return best_a
 
-        for a in node.s.get_valid_moves():
-            p = P[a]
-            q = node.Q[a] if a in node.N else 0.0
-            n = node.N[a] if a in node.N else 0
+    def _rollout(self, s) -> float:
+        """
+        Rollout simulation: plays heuristically to the end of the game, then restores the game state.
+        """
+        player = s.current_player
+        moves_made = 0
+        
+        while s.is_running():
+            valid = s.get_valid_moves()
             
-            u = self.c_puct * p * N_sqrt / (1 + n)
-            if q + u > maximum:
-                maximum = q + u
-                a_max = a
-        return a_max
+            # Simple heuristic: try to grab a 3-line box if possible, otherwise random.
+            move_to_play = None
+            for r in range(s.SIZE):
+                for c in range(s.SIZE):
+                    if s.b[r][c] == 0:
+                        lines = s.get_lines_of_box((r, c))
+                        drawn = sum(1 for line in lines if s.l[line] != 0)
+                        if drawn == 3:
+                            for line in lines:
+                                if s.l[line] == 0:
+                                    move_to_play = line
+                                    break
+                        if move_to_play is not None:
+                            break
+                if move_to_play is not None:
+                    break
+                    
+            if move_to_play is None:
+                move_to_play = random.choice(valid)
+                
+            s.execute_move(move_to_play)
+            moves_made += 1
+            
+        result = s.result
+        val = 1.0 if result == player else (-1.0 if result != 0 else 0.0)
+        
+        for _ in range(moves_made):
+            s.undo_move()
+            
+        return val
 
-    def expand(self, node: AZNode, a: int) -> AZNode:
-        s = copy.deepcopy(node.s)
-        s.execute_move(a)
-        return AZNode(parent=node, s=s, a=a)
 
-    def backup(self, node: AZNode, a: int, v: float):
-        if a not in node.N:
-            node.Q[a] = v
-            node.N[a] = 1
-        else:
-            n = node.N[a]
-            self.backup_q_update(node, a, v, n)
-
-    def backup_q_update(self, node, a, v, n):
-        node.Q[a] = (n * node.Q[a] + v) / (n + 1)
-        node.N[a] += 1
-
+# ---------------------------------------------------------------------------
+# Heuristic Agent wrapping MCTS
+# ---------------------------------------------------------------------------
 
 class MCTSHeuristicAgent(BaseAgent):
-    def __init__(self, name: str, model, mcts_parameters: dict):
+    def __init__(self, name: str, mcts_parameters: dict):
         super().__init__(name)
-        self.model = model
         self.mcts_parameters = mcts_parameters
 
     def _get_greedy_move(self, game_state) -> int:
         """Returns a move that instantly completes a 3-line box."""
         for r in range(game_state.SIZE):
             for c in range(game_state.SIZE):
-                if game_state.b[r][c] == 0:  
+                if game_state.b[r][c] == 0:
                     lines = game_state.get_lines_of_box((r, c))
                     drawn_count = sum(1 for line in lines if game_state.l[line] != 0)
                     if drawn_count == 3:
@@ -139,56 +228,40 @@ class MCTSHeuristicAgent(BaseAgent):
     def _get_safe_moves(self, game_state) -> list:
         """Filters out moves that would hand a 3-line box to the opponent."""
         valid_moves = game_state.get_valid_moves()
-        safe_moves = []
+        safe_moves  = []
         for move in valid_moves:
             is_safe = True
             for box in game_state.get_boxes_of_line(move):
                 lines = game_state.get_lines_of_box(box)
                 drawn_count = sum(1 for l in lines if game_state.l[l] != 0)
-                if drawn_count == 2:  
+                if drawn_count == 2:
                     is_safe = False
                     break
             if is_safe:
                 safe_moves.append(move)
         return safe_moves
 
-    # -----------------------------------------------------------------------
-    # Chain-Handling Heuristic (Double-Cross strategy)
-    # -----------------------------------------------------------------------
-
     def _find_chains(self, game_state) -> list:
-        """
-        Identifies all connected chains of capturable boxes (boxes with exactly
-        3 drawn lines) linked together, where taking one opens the next.
-        Returns a list of chains; each chain is an ordered list of (box, free_line)
-        pairs representing capturable boxes and the line to draw to claim them.
-        """
-        capturable = {}  # box -> free_line
+        capturable = {}
         for r in range(game_state.SIZE):
             for c in range(game_state.SIZE):
                 if game_state.b[r][c] == 0:
                     lines = game_state.get_lines_of_box((r, c))
-                    free = [l for l in lines if game_state.l[l] == 0]
+                    free  = [l for l in lines if game_state.l[l] == 0]
                     if len(free) == 1:
                         capturable[(r, c)] = free[0]
 
-        # BFS over adjacent capturable boxes to find chains
         visited = set()
-        chains = []
+        chains  = []
 
         def get_adjacent_capturable(box):
             r, c = box
-            neighbors = []
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                nb = (r + dr, c + dc)
-                if nb in capturable:
-                    neighbors.append(nb)
-            return neighbors
+            return [nb for nb in [(r-1,c),(r+1,c),(r,c-1),(r,c+1)]
+                    if nb in capturable]
 
         for start_box in capturable:
             if start_box in visited:
                 continue
-            # BFS to grow chain
             chain = []
             queue = [start_box]
             visited.add(start_box)
@@ -204,72 +277,49 @@ class MCTSHeuristicAgent(BaseAgent):
         return chains
 
     def _get_double_cross_move(self, game_state) -> int:
-        """
-        Implements the Double-Cross chain-handling strategy:
-        - For long chains (3+ boxes): Take the chain except the last 2 boxes;
-          deliberately leave those 2 for the opponent (sacrifice).
-          This lets the opponent capture 2 boxes, but then hands the NEXT chain
-          back to you via a double-cross.
-        - For short chains (1-2 boxes): Just take them greedily (greedy already handles this).
-        - If all moves open a chain: pick the one that opens the shortest chain
-          (minimum damage / double-cross).
-        Returns a move index or None if no chain-related move is found.
-        """
         chains = self._find_chains(game_state)
 
-        # Handle long chains: take all but the last 2
         for chain in chains:
             if len(chain) >= 3:
-                # Take first box of the chain (draw the line that claims it)
-                # But skip the last 2 boxes (sacrifice them as double-cross)
-                return chain[0][1]  # free_line of first capturable box
+                return chain[0][1]
 
-        # All chains are short (1-2): greedy already handles these; no special move here
-        # If no safe moves exist, open the shortest available chain (minimize damage)
         safe_moves = self._get_safe_moves(game_state)
         if not safe_moves:
-            # We must open a chain — find the move that opens the shortest one
             valid_moves = game_state.get_valid_moves()
-            best_move = None
-            best_cost = float('inf')
-
+            best_move   = None
+            best_cost   = float('inf')
             for move in valid_moves:
-                # Simulate the move and see how long a chain it opens
-                import copy
-                sim = copy.deepcopy(game_state)
-                sim.execute_move(move)
-                opened_chains = self._find_chains(sim)
-                cost = sum(len(c) for c in opened_chains)
+                game_state.execute_move(move)
+                cost = sum(len(c) for c in self._find_chains(game_state))
+                game_state.undo_move()
                 if cost < best_cost:
                     best_cost = cost
                     best_move = move
-
             return best_move
 
         return None
 
     def get_move(self, game_state) -> int:
-        # 1. Greedy Rule: Take any free boxes immediately (short chains & individual captures)
+        # 1. Greedy: capture any immediate boxes
         greedy_move = self._get_greedy_move(game_state)
         if greedy_move is not None:
             return greedy_move
 
-        # 2. Chain-Handling (Double-Cross): Handle long chains strategically
+        # 2. Chain-Handling (Double-Cross)
         chain_move = self._get_double_cross_move(game_state)
         if chain_move is not None:
             return chain_move
 
-        # 3. Run standard MCTS
-        mcts = MCTS(self.model, self.mcts_parameters)
+        # 3. Pure MCTS play
+        mcts  = MCTS(self.mcts_parameters)
         probs = mcts.play(game_state, temp=0)
 
-        # 4. Safety Rule: Override MCTS if it tries to give away a free box
+        # 4. Safety override: don't let MCTS pick a move that gives away a box if safe moves exist
         safe_moves = self._get_safe_moves(game_state)
         if safe_moves and len(safe_moves) < len(game_state.get_valid_moves()):
             safe_probs = np.zeros_like(probs)
             for move in safe_moves:
                 safe_probs[move] = probs[move]
-            
             if np.sum(safe_probs) > 0:
                 return int(np.argmax(safe_probs))
 

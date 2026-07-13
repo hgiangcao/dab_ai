@@ -52,23 +52,8 @@ class DotsAndBoxesGame:
         self.N_BOXES = size * size
         self.b = np.zeros((size, size))
 
-    def __eq__(self, obj) -> bool:
-        if obj is None:
-            return False
-
-        if not isinstance(obj, DotsAndBoxesGame):
-            return False
-
-        if not self.current_player == obj.current_player or \
-                not self.result == obj.result or \
-                not self.SIZE == obj.SIZE or \
-                not self.N_LINES == obj.N_LINES or \
-                not np.array_equal(self.l, obj.l) or \
-                not self.N_BOXES == obj.N_BOXES or \
-                not np.array_equal(self.b, obj.b):
-            return False
-        return True
-
+        # undo stack: each entry is (line, boxes_captured, player_before, result_before)
+        self._history: list = []
 
     """
     Class setters.
@@ -89,28 +74,66 @@ class DotsAndBoxesGame:
     Game Logic.
     """
     def execute_move(self, line: int):
+        # Save state for undo before modifying anything
+        player_before  = self.current_player
+        result_before  = self.result
 
         # execute move means drawing the line
         self.draw_line(line)
 
         # check whether a new box was captured
-        # this is the case when the line belongs to a box (maximum of two boxes) which now has 4 drawn lines
-        box_captured = False
+        boxes_captured = []
         for box in self.get_boxes_of_line(line):
             lines = self.get_lines_of_box(box)
-
             if np.count_nonzero(self.l[lines]) == 4:
-                self.capture_box(
-                    row=box[0],
-                    col=box[1]
-                )
-                box_captured = True
+                self.capture_box(row=box[0], col=box[1])
+                boxes_captured.append(box)
 
-        # switch current player when the player did not capture a box by drawing the line
-        if not box_captured:
+        # switch current player when the player did not capture a box
+        if not boxes_captured:
             self.switch_current_player()
         else:
             self.check_finished()
+
+        # Push undo record
+        self._history.append((line, boxes_captured, player_before, result_before))
+
+    def undo_move(self):
+        """Undo the last execute_move call. O(boxes_captured) — essentially O(1)."""
+        if not self._history:
+            raise RuntimeError("No move to undo")
+        line, boxes_captured, player_before, result_before = self._history.pop()
+
+        # Restore scalar fields first
+        self.current_player = player_before
+        self.result         = result_before
+
+        # Un-draw the line
+        self.l[line] = 0.0
+
+        # Un-capture any boxes
+        for box in boxes_captured:
+            self.b[box[0]][box[1]] = 0.0
+
+
+    def __eq__(self, obj) -> bool:
+        if obj is None:
+            return False
+
+        if not isinstance(obj, DotsAndBoxesGame):
+            return False
+
+        if not self.current_player == obj.current_player or \
+                not self.result == obj.result or \
+                not self.SIZE == obj.SIZE or \
+                not self.N_LINES == obj.N_LINES or \
+                not np.array_equal(self.l, obj.l) or \
+                not self.N_BOXES == obj.N_BOXES or \
+                not np.array_equal(self.b, obj.b):
+            return False
+        return True
+
+
 
     def check_finished(self):
         if self.result is not None:

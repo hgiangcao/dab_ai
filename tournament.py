@@ -29,18 +29,21 @@ class RandomAgent(BaseAgent):
             return None
         return random.choice(valid_moves)
 
-def create_agent(name: str):
+def create_agent(name: str, size: int):
     if name == "Random":
         return RandomAgent()
     elif name == "Alpha-Beta (d=2)":
         from bots.alpha_beta import AlphaBetaPlayer
         return AlphaBetaPlayer(name=name, depth=2)
+    elif name == "Alpha-Beta (d=4)":
+        from bots.alpha_beta import AlphaBetaPlayer
+        return AlphaBetaPlayer(name=name, depth=4)
     elif name == "MCTS (100)":
         from bots.mcts_x import MCTS100Agent
-        return MCTS100Agent(name=name)
+        return MCTS100Agent(name=name, size=size)
     elif name == "MCTS (1000)":
         from bots.mcts_x import MCTS1000Agent
-        return MCTS1000Agent(name=name)
+        return MCTS1000Agent(name=name, size=size)
     else:
         raise ValueError(f"Unknown agent name: {name}")
 
@@ -49,14 +52,15 @@ def run_single_matchup(args):
     from game import DotsAndBoxesGame
     
     # Initialize agents inside the worker process
-    agent1 = create_agent(agent1_name)
-    agent2 = create_agent(agent2_name)
+    print()
+    agent1 = create_agent(agent1_name, size)
+    agent2 = create_agent(agent2_name, size)
     
     a1_wins = 0
     a2_wins = 0
     draws = 0
     
-    for i in range(num_games):
+    for i in tqdm(range(num_games), desc=f"Playing {agent1_name} vs {agent2_name}"):
         # Alternate who starts to ensure fairness
         starting_player = 1 if (i % 2 == 0) else -1
         game = DotsAndBoxesGame(size=size, starting_player=starting_player)
@@ -105,14 +109,14 @@ def plot_heatmap(matrix, agent_names, output_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Dots and Boxes agents in a round-robin tournament.")
-    parser.add_argument("--size", type=int, default=3, help="Grid size of the Dots and Boxes board (default: 3).")
+    parser.add_argument("--size", type=int, default=5, help="Grid size of the Dots and Boxes board (default: 3).")
     parser.add_argument("--games", type=int, default=20, help="Number of games to play per matchup (default: 20).")
     parser.add_argument("--workers", type=int, default=None, help="Number of parallel worker processes (default: cpu_count - 1).")
     parser.add_argument("--output", type=str, default="tournament_heatmap.png", help="Path to export the heatmap PNG (default: tournament_heatmap.png).")
     args = parser.parse_args()
 
     # List of agent names to include in the tournament
-    agent_names = ["Random", "Alpha-Beta (d=2)", "MCTS (100)", "MCTS (1000)"]
+    agent_names = ["Random", "Alpha-Beta (d=2)",  "MCTS (100)", "MCTS (1000)"]
     n_agents = len(agent_names)
     
     # Create the tasks list for all distinct pairs (i < j)
