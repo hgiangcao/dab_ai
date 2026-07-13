@@ -101,7 +101,8 @@ class AlphaBetaPlayer(BaseAgent):
         my_boxes = int((s.b == player).sum())
         opp_boxes = int((s.b == -player).sum())
 
-        value = (my_boxes - opp_boxes) * 100
+        value = 0
+        value += (my_boxes - opp_boxes) * 100
 
         unsafe = 0
         chains = 0
@@ -113,14 +114,15 @@ class AlphaBetaPlayer(BaseAgent):
                     filled = sum(1 for ln in lines if s.l[ln] != 0)
                     if filled == 3:
                         unsafe += 1
-                    elif filled == 2:
+                    if filled == 2:
                         chains += 1
 
-        mover_bonus = unsafe * 50 - chains * 5 + len(s.get_valid_moves())
-        if s.current_player == player:
-            value += mover_bonus
-        else:
-            value -= mover_bonus
+        # avoid creating opportunities
+        value -= unsafe * 50
+        # chain control
+        value -= chains * 5
+        # mobility
+        value += len(s.get_valid_moves())
 
         return value
 
@@ -156,9 +158,7 @@ class AlphaBetaPlayer(BaseAgent):
         original_beta  = beta
         tt_best_move   = None
 
-        tt_key = (current_hash, s_node.b.tobytes(), int(s_node.current_player))
-
-        tt_entry = zobrist.lookup(tt_key)
+        tt_entry = zobrist.lookup(current_hash)
         if tt_entry is not None:
             tt_best_move = tt_entry.get('move')
             if tt_entry['depth'] >= depth:
@@ -216,11 +216,10 @@ class AlphaBetaPlayer(BaseAgent):
                 safe_moves.append(move)
 
         def heuristic_score(m):
-            mover = s_node.current_player
             s_node.execute_move(m)
             try:
-                score = AlphaBetaPlayer.evaluate(s_node, True)
-                return score if s_node.current_player == mover else -score
+                score = AlphaBetaPlayer.evaluate(s_node, maximize)
+                return score if maximize else -score
             finally:
                 s_node.undo_move()
 
@@ -262,14 +261,14 @@ class AlphaBetaPlayer(BaseAgent):
                 if v_child > v_best:
                     a_best = a
                     v_best = v_child
-                if v_best >= beta:
+                if v_best > beta:
                     break
                 alpha = max(alpha, v_best)
             else:
                 if v_child < v_best:
                     a_best = a
                     v_best = v_child
-                if v_best <= alpha:
+                if v_best < alpha:
                     break
                 beta = min(beta, v_best)
 
@@ -278,7 +277,7 @@ class AlphaBetaPlayer(BaseAgent):
         elif v_best >= original_beta:  tt_type = 'lower'
         else:                          tt_type = 'exact'
 
-        zobrist.store(tt_key, {
+        zobrist.store(current_hash, {
             'move': a_best, 'value': v_best,
             'depth': depth, 'type': tt_type,
         })

@@ -35,18 +35,27 @@ def create_agent(name: str, size: int):
     elif name == "Alpha-Beta (1s)":
         from bots.alpha_beta import AlphaBetaPlayer
         return AlphaBetaPlayer(name=name, time_limit=1.0)
+    elif name == "Alpha-Beta v1 (1s)":
+        from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
+        return AlphaBetaPlayerV1(name=name, time_limit=1.0)
     elif name == "MCTS (1s)":
         from bots.mcts_x import MCTSGAgent
         return MCTSGAgent(name=name, time_limit=1.0)
     elif name == "Alpha-Beta (0.1s)":
         from bots.alpha_beta import AlphaBetaPlayer
         return AlphaBetaPlayer(name=name, time_limit=0.1)
+    elif name == "Alpha-Beta v1 (0.1s)":
+        from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
+        return AlphaBetaPlayerV1(name=name, time_limit=0.1)
     elif name == "MCTS (0.1s)":
         from bots.mcts_x import MCTSGAgent
         return MCTSGAgent(name=name, time_limit=0.1)
     elif name == "Alpha-Beta (0.5s)":
         from bots.alpha_beta import AlphaBetaPlayer
         return AlphaBetaPlayer(name=name, time_limit=0.5)
+    elif name == "Alpha-Beta v1 (0.5s)":
+        from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
+        return AlphaBetaPlayerV1(name=name, time_limit=0.5)
     elif name == "MCTS (0.5s)":
         from bots.mcts_x import MCTSGAgent
         return MCTSGAgent(name=name, time_limit=0.5)
@@ -128,7 +137,17 @@ def main():
     args = parser.parse_args()
 
     # List of agent names to include in the tournament
-    agent_names = ["Random", "Alpha-Beta (0.1s)", "MCTS (0.1s)", "Alpha-Beta (0.5s)", "MCTS (0.5s)", "Greedy", "Greedy Chain"]
+    agent_names = [
+        "Random", 
+        "Greedy", 
+        "Greedy Chain",
+        "Alpha-Beta (0.1s)", 
+        "Alpha-Beta (0.5s)", 
+        "Alpha-Beta v1 (0.1s)",
+        "Alpha-Beta v1 (0.5s)",
+        "MCTS (0.1s)", 
+        "MCTS (0.5s)",
+    ]
     n_agents = len(agent_names)
     
     # Create the tasks list for all distinct pairs (i < j)

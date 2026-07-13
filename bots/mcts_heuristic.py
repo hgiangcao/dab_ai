@@ -9,7 +9,6 @@ Clean, standard UCT Monte Carlo Tree Search implementation for Dots and Boxes.
 import math
 import random
 import time
-import numpy as np
 from agent_interface import BaseAgent
 
 class Node:
@@ -213,18 +212,64 @@ class MCTSHeuristicAgent(BaseAgent):
         super().__init__(name)
         self.mcts_parameters = mcts_parameters
 
-    def _get_greedy_move(self, game_state) -> int:
-        """Returns a move that instantly completes a 3-line box."""
+    def _capturable_boxes(self, game_state) -> list:
+        result = []
         for r in range(game_state.SIZE):
             for c in range(game_state.SIZE):
                 if game_state.b[r][c] == 0:
                     lines = game_state.get_lines_of_box((r, c))
-                    drawn_count = sum(1 for line in lines if game_state.l[line] != 0)
-                    if drawn_count == 3:
-                        for line in lines:
-                            if game_state.l[line] == 0:
-                                return line
-        return None
+                    free = [ln for ln in lines if game_state.l[ln] == 0]
+                    if len(free) == 1:
+                        result.append(free[0])
+        return result
+
+    def _is_capturing_move(self, game_state, line) -> bool:
+        for box in game_state.get_boxes_of_line(line):
+            lines = game_state.get_lines_of_box(box)
+            if sum(1 for ln in lines if game_state.l[ln] != 0) == 3:
+                return True
+        return False
+
+    def _trace_capture_chain(self, game_state):
+        run_lines = []
+        moves = 0
+        mover = game_state.current_player
+        simple = True
+        while True:
+            caps = self._capturable_boxes(game_state)
+            if not caps:
+                break
+            if len(caps) > 1:
+                simple = False
+                break
+            free_line = caps[0]
+            run_lines.append(free_line)
+            game_state.execute_move(free_line)
+            moves += 1
+            if game_state.current_player != mover:
+                break
+        remaining_free = len(game_state.get_valid_moves())
+        for _ in range(moves):
+            game_state.undo_move()
+        if not simple:
+            return None, 0
+        return run_lines, remaining_free
+
+    def _get_capture_move(self, game_state):
+        caps = self._capturable_boxes(game_state)
+        if not caps:
+            return None
+
+        run_lines, remaining_free = self._trace_capture_chain(game_state)
+        if run_lines is None:
+            return caps[0]
+
+        if len(run_lines) == 2 and remaining_free > 0:
+            declining = run_lines[-1]
+            if not self._is_capturing_move(game_state, declining):
+                return declining
+
+        return run_lines[0]
 
     def _get_safe_moves(self, game_state) -> list:
         """Filters out moves that would hand a 3-line box to the opponent."""
@@ -286,60 +331,45 @@ class MCTSHeuristicAgent(BaseAgent):
 
         return list(components.values())
 
-    def _get_double_cross_move(self, game_state) -> int:
-        chains = self._find_chains(game_state)
-
-        for chain in chains:
-            if len(chain) >= 3:
-                return chain[0][1]
-
-        safe_moves = self._get_safe_moves(game_state)
-        if not safe_moves:
-            valid_moves = game_state.get_valid_moves()
-            best_move   = None
-            best_cost   = float('inf')
-            for move in valid_moves:
-                game_state.execute_move(move)
-                cost = sum(len(c) for c in self._find_chains(game_state))
-                game_state.undo_move()
-                if cost < best_cost:
-                    best_cost = cost
-                    best_move = move
-            return best_move
-
-        return None
+    def _minimize_sacrifice(self, game_state, preferred_move, valid_moves):
+        best_move = preferred_move
+        best_cost = float('inf')
+        for move in valid_moves:
+            game_state.execute_move(move)
+            cost = sum(len(c) for c in self._find_chains(game_state))
+            game_state.undo_move()
+            if cost < best_cost:
+                best_cost = cost
+                best_move = move
+        return best_move if best_move is not None else valid_moves[0]
 
     def get_move(self, game_state) -> int:
-        # 1. Greedy: capture any immediate boxes
-        greedy_move = self._get_greedy_move(game_state)
-        if greedy_move is not None:
-            return greedy_move
+        capture_move = self._get_capture_move(game_state)
+        if capture_move is not None:
+            return capture_move
 
-        # 2. Chain-Handling (Double-Cross)
-        chain_move = self._get_double_cross_move(game_state)
-        if chain_move is not None:
-            return chain_move
-
-        # 3. Hybrid Endgame: Delegate to Alpha-Beta if <= 12 moves remaining
         valid_moves = game_state.get_valid_moves()
+
         if len(valid_moves) <= 12:
             from bots.alpha_beta import AlphaBetaPlayer
-            ab = AlphaBetaPlayer(time_limit=self.mcts_parameters.get("time_limit", 2.0))
+            ab = AlphaBetaPlayer(
+                time_limit=self.mcts_parameters.get("time_limit", 2.0),
+                endgame_threshold=12,
+            )
             return ab.get_move(game_state)
 
-        # 4. Pure MCTS play
         mcts = MCTS(
             n_simulations=self.mcts_parameters.get("n_simulations", 100),
             time_limit=self.mcts_parameters.get("time_limit", None),
             c_puct=self.mcts_parameters.get("c_puct", 1.4)
         )
-        
         best_move = mcts.search(game_state)
 
-        # 5. Safety override: don't let MCTS pick a move that gives away a box if safe moves exist
         safe_moves = self._get_safe_moves(game_state)
-        if safe_moves and len(safe_moves) < len(game_state.get_valid_moves()):
-            if best_move not in safe_moves:
-                return random.choice(safe_moves)
+        if not safe_moves:
+            return self._minimize_sacrifice(game_state, best_move, valid_moves)
+
+        if best_move not in safe_moves and len(safe_moves) < len(valid_moves):
+            return random.choice(safe_moves)
 
         return best_move if best_move is not None else valid_moves[0]
