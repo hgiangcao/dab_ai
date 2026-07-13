@@ -215,7 +215,7 @@ class AlphaZeroTrainer:
         
         # Reverse Curriculum Setup
         start_fill_pct = 0.70
-        decay_iterations = int(self.args.num_iters * 0.5)
+        decay_iterations = 10
         decay_step = 0.70 / decay_iterations if decay_iterations > 0 else 0
         
         for i in range(starting_iteration, self.args.num_iters + 1):
