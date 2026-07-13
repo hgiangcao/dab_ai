@@ -56,6 +56,12 @@ def create_agent(name: str, size: int):
     elif name == "Alpha-Beta v1 (0.5s)":
         from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
         return AlphaBetaPlayerV1(name=name, time_limit=0.5)
+    elif name == "Alpha-Beta v2 (0.1s)":
+        from bots.alpha_beta_v2 import AlphaBetaPlayer as AlphaBetaPlayerV2
+        return AlphaBetaPlayerV2(name=name, time_limit=0.1)
+    elif name == "Alpha-Beta v2 (0.5s)":
+        from bots.alpha_beta_v2 import AlphaBetaPlayer as AlphaBetaPlayerV2
+        return AlphaBetaPlayerV2(name=name, time_limit=0.5)
     elif name == "MCTS (0.5s)":
         from bots.mcts_x import MCTSGAgent
         return MCTSGAgent(name=name, time_limit=0.5)
@@ -131,7 +137,7 @@ def plot_heatmap(matrix, agent_names, output_path):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Dots and Boxes agents in a round-robin tournament.")
     parser.add_argument("--size", type=int, default=5, help="Grid size of the Dots and Boxes board (default: 3).")
-    parser.add_argument("--games", type=int, default=40, help="Number of games to play per matchup (default: 20).")
+    parser.add_argument("--games", type=int, default=20, help="Number of games to play per matchup (default: 20).")
     parser.add_argument("--workers", type=int, default=None, help="Number of parallel worker processes (default: cpu_count - 1).")
     parser.add_argument("--output", type=str, default="tournament_heatmap.png", help="Path to export the heatmap PNG (default: tournament_heatmap.png).")
     args = parser.parse_args()
@@ -145,6 +151,8 @@ def main():
         "Alpha-Beta (0.5s)", 
         "Alpha-Beta v1 (0.1s)",
         "Alpha-Beta v1 (0.5s)",
+        "Alpha-Beta v2 (0.1s)",
+        "Alpha-Beta v2 (0.5s)",
         "MCTS (0.1s)", 
         "MCTS (0.5s)",
     ]
