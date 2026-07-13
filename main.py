@@ -17,14 +17,14 @@ if __name__ == "__main__":
     run_dir = get_next_run_dir()
     
     args = dotdict({
-        'lr': 0.001,
+        'lr': 0.0005,
         'epochs': 10,
         'batch_size': 64,
         'num_channels': 256,
         'num_res_blocks': 10, 
         'l2_reg': 1e-4,
-        'num_iters': 100,
-        'num_eps': 50,
+        'num_iters': 1200,
+        'num_eps': 100,
         'temp_threshold': 15,
         'maxlen_queue': 200000,
         'start_fill_pct': 0.8,

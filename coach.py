@@ -57,6 +57,30 @@ def worker_execute_episode(worker_args):
             pi = np.zeros(g.N_LINES, dtype=np.float32)
             pi[move] = 1.0
             return pi, 0
+    elif opp_type == "random":
+        import random as rand
+        def agent_opp(g, t):
+            valid_moves = g.get_valid_moves()
+            move = rand.choice(valid_moves) if valid_moves else 0
+            pi = np.zeros(g.N_LINES, dtype=np.float32)
+            pi[move] = 1.0
+            return pi, 0
+    elif opp_type == "greedy":
+        from bots.greedy import GreedyPlayer
+        baseline = GreedyPlayer(name="Greedy")
+        def agent_opp(g, t):
+            move = baseline.get_move(copy.deepcopy(g))
+            pi = np.zeros(g.N_LINES, dtype=np.float32)
+            pi[move] = 1.0
+            return pi, 0
+    elif opp_type == "greedy_chain":
+        from bots.greedy_improve import GreedyChainPlayer
+        baseline = GreedyChainPlayer(name="GreedyChain")
+        def agent_opp(g, t):
+            move = baseline.get_move(copy.deepcopy(g))
+            pi = np.zeros(g.N_LINES, dtype=np.float32)
+            pi[move] = 1.0
+            return pi, 0
             
     p1_is_latest = random.choice([True, False])
     
@@ -106,7 +130,9 @@ def worker_execute_episode(worker_args):
         val = r if x[2] == 1 else -r
         final_examples.append((x[0], x[1], x[3], val))
         
-    return final_examples, episode_step, avg_depth
+    latest_won = (r == 1 if p1_is_latest else r == -1)
+    latest_drawn = (r == 0)
+    return final_examples, episode_step, avg_depth, latest_won, latest_drawn
 
 def worker_play_single(worker_args):
     """Plays a single arena match in an isolated worker process."""
@@ -144,6 +170,16 @@ def worker_play_single(worker_args):
         baseline = MCTSGAgent(name="MCTS_0.1s", time_limit=0.1)
         def agent2(g):
             return baseline.get_move(copy.deepcopy(g))
+    elif opponent_type == "greedy":
+        from bots.greedy import GreedyPlayer
+        baseline = GreedyPlayer(name="Greedy")
+        def agent2(g):
+            return baseline.get_move(copy.deepcopy(g))
+    elif opponent_type == "greedy_chain":
+        from bots.greedy_improve import GreedyChainPlayer
+        baseline = GreedyChainPlayer(name="GreedyChain")
+        def agent2(g):
+            return baseline.get_move(copy.deepcopy(g))
     else: # "pnet"
         pnet = NNetWrapper(dummy_game, args)
         pbuffer = io.BytesIO(pnet_bytes)
@@ -179,6 +215,11 @@ class AlphaZeroTrainer:
         self.args = args
         self.memory = deque(maxlen=self.args.maxlen_queue)
         self.train_examples_history = deque([], maxlen=self.args.keep_history_iters)
+        
+        self.current_phase = 0
+        self.phase_wins = 0
+        self.phase_decisive = 0
+        self.iterations_in_current_phase = 0
         
         # Load Reverse Curriculum Logs
         self.json_logs = []
@@ -240,18 +281,33 @@ class AlphaZeroTrainer:
                 sampled_sequences = [None] * self.args.num_eps
             
             worker_args_list = []
+            
+            phases_config = [
+                [("random", 0.01)],
+                [("greedy", 0.1)],
+                [("greedy_chain", 0.1)],
+                [("alpha_beta_0.1s", 0.1)],
+                [("mcts_0.1s", 0.1)],
+                [("self", 0.4), ("best", 0.1), ("past", 0.1)]
+            ]
+            
+            current_pool = []
+            for phase_idx in range(self.current_phase + 1):
+                current_pool.extend(phases_config[phase_idx])
+                
+            total_prob = sum(p for _, p in current_pool)
+            normalized_probs = [p / total_prob for _, p in current_pool]
+            
             for seq in sampled_sequences:
-                r = random.random()
-                if r < 0.50:
-                    opp_type, opp_path = "self", None
-                elif r < 0.65:
-                    opp_type, opp_path = ("best", best_path) if os.path.exists(best_path) else ("self", None)
-                elif r < 0.80:
-                    opp_type, opp_path = ("past", random.choice(past_checkpoints)) if past_checkpoints else ("self", None)
-                elif r < 0.90:
-                    opp_type, opp_path = "alpha_beta_0.1s", None
-                else:
-                    opp_type, opp_path = "mcts_0.1s", None
+                opp_type = np.random.choice([name for name, _ in current_pool], p=normalized_probs)
+                opp_path = None
+                
+                if opp_type == "best":
+                    opp_path = best_path if os.path.exists(best_path) else None
+                    if opp_path is None: opp_type = "self"
+                elif opp_type == "past":
+                    opp_path = random.choice(past_checkpoints) if past_checkpoints else None
+                    if opp_path is None: opp_type = "self"
                     
                 worker_args_list.append((self.game_size, temp_latest_path, self.MCTS, self.args, seq, start_fill_pct, opp_type, opp_path))
             
@@ -264,10 +320,29 @@ class AlphaZeroTrainer:
             with concurrent.futures.ProcessPoolExecutor(max_workers=8, mp_context=mp_context) as executor:
                 futures = [executor.submit(worker_execute_episode, arg) for arg in worker_args_list]
                 for future in tqdm(concurrent.futures.as_completed(futures), total=self.args.num_eps, desc="Self Play"):
-                    examples, length, depth = future.result()
+                    examples, length, depth, latest_won, latest_drawn = future.result()
                     iteration_data.append(examples)
                     episode_lengths.append(length)
                     episode_depths.append(depth)
+                    if not latest_drawn:
+                        self.phase_decisive += 1
+                        if latest_won:
+                            self.phase_wins += 1
+                            
+            # Calculate and log phase winrate
+            phase_winrate = self.phase_wins / self.phase_decisive if self.phase_decisive > 0 else 0.5
+            self.writer.add_scalar('Curriculum/Current_Phase', self.current_phase, i)
+            self.writer.add_scalar('Curriculum/Phase_Winrate', phase_winrate, i)
+            print(f"Phase {self.current_phase} Winrate: {phase_winrate:.1%} ({self.phase_wins}/{self.phase_decisive})")
+            
+            self.iterations_in_current_phase += 1
+            if (phase_winrate >= 0.60 or self.iterations_in_current_phase >= 200) and self.current_phase < 5:
+                reason = "winrate >= 60%" if phase_winrate >= 0.60 else "max iterations reached"
+                print(f"Phase {self.current_phase} cleared ({reason})! Advancing to Phase {self.current_phase + 1}...")
+                self.current_phase += 1
+                self.phase_wins = 0
+                self.phase_decisive = 0
+                self.iterations_in_current_phase = 0
                 
             # Log SelfPlay Metrics
             avg_length = sum(episode_lengths) / len(episode_lengths) if episode_lengths else 0
@@ -336,7 +411,9 @@ class AlphaZeroTrainer:
             eval_opponents = {
                 "random": "Random",
                 "alpha_beta_0.1s": "AlphaBeta_0.1s",
-                "mcts_0.1s": "MCTS_0.1s"
+                "mcts_0.1s": "MCTS_0.1s",
+                "greedy": "Greedy",
+                "greedy_chain": "GreedyChain"
             }
             
             for opp_type, opp_name in eval_opponents.items():
