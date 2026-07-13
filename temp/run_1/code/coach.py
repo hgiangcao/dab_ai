@@ -1,18 +1,15 @@
 import os
 import copy
-import json
-import random
 import numpy as np
 from collections import deque
 from tqdm import tqdm
 import multiprocessing
 import concurrent.futures
-import io
-import torch
+from torch.utils.tensorboard import SummaryWriter
 
 def worker_execute_episode(worker_args):
     """Generates self-play data using an isolated worker process."""
-    game_size, nnet_bytes, mcts_class, args, game_sequence, start_fill_pct = worker_args
+    game_size, nnet_state_dict, mcts_class, args = worker_args
     
     # Must import inside worker to avoid pickle issues
     from game import DotsAndBoxesGame
@@ -20,22 +17,11 @@ def worker_execute_episode(worker_args):
     
     dummy_game = DotsAndBoxesGame(size=game_size)
     nnet = NNetWrapper(dummy_game, args)
-    
-    # Load from bytes safely
-    buffer = io.BytesIO(nnet_bytes)
-    state_dict = torch.load(buffer, weights_only=True)
-    nnet.nnet.load_state_dict(state_dict)
+    nnet.nnet.load_state_dict(nnet_state_dict)
     nnet.nnet.eval()
     
     train_examples = []
     game = DotsAndBoxesGame(size=game_size, starting_player=1)
-    
-    # Reverse Curriculum Logic: Pre-fill the board using the historical log sequence
-    if game_sequence is not None and start_fill_pct >= 0.001:
-        target_move_index = int(len(game_sequence) * start_fill_pct)
-        for move in game_sequence[:target_move_index]:
-            game.execute_move(move)
-            
     episode_step = 0
     depths = []
     
@@ -71,7 +57,7 @@ def worker_execute_episode(worker_args):
 
 def worker_play_single(worker_args):
     """Plays a single arena match in an isolated worker process."""
-    game_size, nnet_bytes, pnet_bytes, mcts_class, args, p1_starts, use_baseline = worker_args
+    game_size, nnet_state_dict, pnet_state_dict, mcts_class, args, p1_starts, use_baseline = worker_args
     
     from game import DotsAndBoxesGame
     from model import NNetWrapper
@@ -80,9 +66,7 @@ def worker_play_single(worker_args):
     
     # Init new network (Agent 1)
     nnet = NNetWrapper(dummy_game, args)
-    buffer = io.BytesIO(nnet_bytes)
-    state_dict = torch.load(buffer, weights_only=True)
-    nnet.nnet.load_state_dict(state_dict)
+    nnet.nnet.load_state_dict(nnet_state_dict)
     nnet.nnet.eval()
     mcts1 = mcts_class(nnet, args)
     def agent1(g):
@@ -97,9 +81,7 @@ def worker_play_single(worker_args):
             return baseline.get_move(copy.deepcopy(g))
     else:
         pnet = NNetWrapper(dummy_game, args)
-        pbuffer = io.BytesIO(pnet_bytes)
-        pstate_dict = torch.load(pbuffer, weights_only=True)
-        pnet.nnet.load_state_dict(pstate_dict)
+        pnet.nnet.load_state_dict(pnet_state_dict)
         pnet.nnet.eval()
         mcts2 = mcts_class(pnet, args)
         def agent2(g):
@@ -129,30 +111,9 @@ class AlphaZeroTrainer:
         self.MCTS = mcts_class
         self.args = args
         self.memory = deque(maxlen=self.args.maxlen_queue)
-        self.train_examples_history = deque([], maxlen=self.args.keep_history_iters)
-        
-        # Load Reverse Curriculum Logs
-        self.json_logs = []
-        log_path = "logs/game_logs.jsonl"
-        expected_moves = 2 * self.game_size * (self.game_size + 1)
-        if os.path.exists(log_path):
-            with open(log_path, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            record = json.loads(line)
-                            moves = record.get("moves", [])
-                            # Only load games that match our current board size exactly
-                            if moves and len(moves) == expected_moves:
-                                self.json_logs.append(moves)
-                        except Exception:
-                            pass
-        print(f"Loaded {len(self.json_logs)} historical game sequences of size {self.game_size}x{self.game_size} for Reverse Curriculum.")
         
         # TensorBoard logging setup
         os.makedirs(self.args.checkpoint_dir, exist_ok=True)
-        from torch.utils.tensorboard import SummaryWriter
         self.writer = SummaryWriter(log_dir=os.path.join(self.args.checkpoint_dir, 'logs'))
 
     def learn(self):
@@ -163,41 +124,22 @@ class AlphaZeroTrainer:
         
         # Force 'spawn' context to safely use CUDA in worker processes
         mp_context = multiprocessing.get_context('spawn')
-        
-        # Reverse Curriculum Setup
-        start_fill_pct = 0.70
-        decay_iterations = int(self.args.num_iters * 0.5)
-        decay_step = 0.70 / decay_iterations if decay_iterations > 0 else 0
-        
+
         for i in range(starting_iteration, self.args.num_iters + 1):
-            print(f"\n#################### Iteration {i}/{self.args.num_iters} ####################")
+            print(f"\\n#################### Iteration {i}/{self.args.num_iters} ####################")
             
-            self.writer.add_scalar("Curriculum/StartFillPct", start_fill_pct, i)
-            
-            # Serialize state dict to bytes to pass to workers safely without PyTorch FD sharing issues
-            buffer = io.BytesIO()
-            torch.save(self.nnet.nnet.state_dict(), buffer)
-            nnet_bytes = buffer.getvalue()
-            
-            # Sample random sequences for each episode
-            if self.json_logs and start_fill_pct >= 0.001:
-                sampled_sequences = [random.choice(self.json_logs) for _ in range(self.args.num_eps)]
-            else:
-                sampled_sequences = [None] * self.args.num_eps
-            
-            worker_args_list = [
-                (self.game_size, nnet_bytes, self.MCTS, self.args, seq, start_fill_pct) 
-                for seq in sampled_sequences
-            ]
+            # Extract state dict to pass to workers
+            current_state_dict = {k: v.cpu() for k, v in self.nnet.nnet.state_dict().items()}
+            worker_args_sp = (self.game_size, current_state_dict, self.MCTS, self.args)
             
             # 1. Self-Play (Parallelized)
-            print(f"------------ Self-Play (Fill: {start_fill_pct*100:.1f}%) ------------")
+            print("------------ Self-Play (Multiprocessing) ------------")
             iteration_data = []
             episode_lengths = []
             episode_depths = []
             
             with concurrent.futures.ProcessPoolExecutor(mp_context=mp_context) as executor:
-                futures = [executor.submit(worker_execute_episode, arg) for arg in worker_args_list]
+                futures = [executor.submit(worker_execute_episode, worker_args_sp) for _ in range(self.args.num_eps)]
                 for future in tqdm(concurrent.futures.as_completed(futures), total=self.args.num_eps, desc="Self Play"):
                     examples, length, depth = future.result()
                     iteration_data.append(examples)
@@ -218,7 +160,7 @@ class AlphaZeroTrainer:
             self.writer.add_scalar('SelfPlay/Memory_Size', len(self.memory), i)
             
             # 3. Neural Network Training
-            print("\n---------- Neural Network Training -----------")
+            print("\\n---------- Neural Network Training -----------")
             pi_loss, v_loss, total_loss = self.nnet.train(list(self.memory))
             
             self.writer.add_scalar('Loss/Policy_Loss', pi_loss, i)
@@ -226,13 +168,11 @@ class AlphaZeroTrainer:
             self.writer.add_scalar('Loss/Total_Loss', total_loss, i)
             
             # 4. Model Comparison (Parallelized)
-            print("\n-------------- Model Comparison (Multiprocessing) --------------")
+            print("\\n-------------- Model Comparison (Multiprocessing) --------------")
             
             pwins, plosses, pdraws = 0, 0, 0
-            
-            pbuffer = io.BytesIO()
-            torch.save(self.pnet.nnet.state_dict(), pbuffer)
-            pnet_bytes = pbuffer.getvalue()
+            pnet_state_dict = {k: v.cpu() for k, v in self.pnet.nnet.state_dict().items()}
+            new_state_dict = {k: v.cpu() for k, v in self.nnet.nnet.state_dict().items()}
             
             # a. Play against Previous Network
             print("Pitting against Previous Network (pnet)...")
@@ -240,7 +180,7 @@ class AlphaZeroTrainer:
             match_args_pnet = []
             for idx in range(self.args.arena_games):
                 p1_starts = idx < half_games
-                match_args_pnet.append((self.game_size, nnet_bytes, pnet_bytes, self.MCTS, self.args, p1_starts, False))
+                match_args_pnet.append((self.game_size, new_state_dict, pnet_state_dict, self.MCTS, self.args, p1_starts, False))
                 
             with concurrent.futures.ProcessPoolExecutor(mp_context=mp_context) as executor:
                 futures = [executor.submit(worker_play_single, arg) for arg in match_args_pnet]
@@ -249,11 +189,8 @@ class AlphaZeroTrainer:
                     if res == 1: pwins += 1
                     elif res == -1: plosses += 1
                     else: pdraws += 1
-            
-            # Decay Curriculum
-            start_fill_pct = max(0.0, start_fill_pct - decay_step)
-            
-            print(f"\nIteration {i} complete. Vs PNet -> Wins: {pwins} | Losses: {plosses} | Draws: {pdraws}")
+                    
+            print(f"Vs PNet -> Wins: {pwins} | Losses: {plosses} | Draws: {pdraws}")
             
             total_decisive = pwins + plosses
             win_rate_vs_old = pwins / total_decisive if total_decisive > 0 else 0.5
@@ -274,7 +211,7 @@ class AlphaZeroTrainer:
             match_args_baseline = []
             for idx in range(baseline_games):
                 p1_starts = idx < (baseline_games // 2)
-                match_args_baseline.append((self.game_size, nnet_bytes, None, self.MCTS, self.args, p1_starts, True))
+                match_args_baseline.append((self.game_size, new_state_dict, None, self.MCTS, self.args, p1_starts, True))
                 
             with concurrent.futures.ProcessPoolExecutor(mp_context=mp_context) as executor:
                 futures = [executor.submit(worker_play_single, arg) for arg in match_args_baseline]

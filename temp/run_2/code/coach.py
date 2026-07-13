@@ -9,6 +9,7 @@ import multiprocessing
 import concurrent.futures
 import io
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 def worker_execute_episode(worker_args):
     """Generates self-play data using an isolated worker process."""
@@ -128,13 +129,11 @@ class AlphaZeroTrainer:
         self.pnet = pnet
         self.MCTS = mcts_class
         self.args = args
-        self.memory = deque(maxlen=self.args.maxlen_queue)
         self.train_examples_history = deque([], maxlen=self.args.keep_history_iters)
         
         # Load Reverse Curriculum Logs
         self.json_logs = []
         log_path = "logs/game_logs.jsonl"
-        expected_moves = 2 * self.game_size * (self.game_size + 1)
         if os.path.exists(log_path):
             with open(log_path, "r") as f:
                 for line in f:
@@ -143,16 +142,14 @@ class AlphaZeroTrainer:
                         try:
                             record = json.loads(line)
                             moves = record.get("moves", [])
-                            # Only load games that match our current board size exactly
-                            if moves and len(moves) == expected_moves:
+                            if moves:
                                 self.json_logs.append(moves)
                         except Exception:
                             pass
-        print(f"Loaded {len(self.json_logs)} historical game sequences of size {self.game_size}x{self.game_size} for Reverse Curriculum.")
+        print(f"Loaded {len(self.json_logs)} historical game sequences for Reverse Curriculum.")
         
         # TensorBoard logging setup
         os.makedirs(self.args.checkpoint_dir, exist_ok=True)
-        from torch.utils.tensorboard import SummaryWriter
         self.writer = SummaryWriter(log_dir=os.path.join(self.args.checkpoint_dir, 'logs'))
 
     def learn(self):
