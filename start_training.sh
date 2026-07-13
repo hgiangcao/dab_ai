@@ -13,7 +13,7 @@ fi
 echo "Starting TensorBoard on http://localhost:6006..."
 pkill -f "tensorboard" || true
 sleep 1
-tensorboard --logdir=temp --port 6006 &
+tensorboard --logdir=logs --port 6006 &
 TB_PID=$!
 
 # Run the training script

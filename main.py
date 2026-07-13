@@ -6,7 +6,7 @@ from model import NNetWrapper, dotdict
 from coach import AlphaZeroTrainer
 from mcts import MCTS
 
-def get_next_run_dir(base_dir='./temp'):
+def get_next_run_dir(base_dir='./logs'):
     os.makedirs(base_dir, exist_ok=True)
     run_idx = 1
     while os.path.exists(os.path.join(base_dir, f'run_{run_idx}')):

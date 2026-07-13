@@ -50,5 +50,10 @@ if command -v nvidia-smi &> /dev/null; then
     fi
 fi
 
+# 7. Clean up running TensorBoard processes
+echo "Checking for running TensorBoard processes..."
+pkill -9 -f "tensorboard" 2>/dev/null || true
+echo "  [✓] TensorBoard processes cleaned"
+
 echo ""
 echo "Done. Project is clean."
