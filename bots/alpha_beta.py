@@ -22,10 +22,11 @@ from lookup_board import ZobristHash
 
 class AlphaBetaPlayer(BaseAgent):
 
-    def __init__(self, name: str = "Alpha-Beta Bot", time_limit: float = 2.0, endgame_threshold: int = 12):
+    def __init__(self, name: str = "Alpha-Beta Bot", time_limit: float = 2.0, endgame_threshold: int = 8):
         super().__init__(name)
         self.time_limit = time_limit
         self.endgame_threshold = endgame_threshold
+        self.zobrist = None
 
     def get_move(self, s: DotsAndBoxesGame) -> int:
         valid_moves = s.get_valid_moves()
@@ -61,14 +62,19 @@ class AlphaBetaPlayer(BaseAgent):
         valid_moves = s_node.get_valid_moves()
         max_depth = len(valid_moves)
         
-        zobrist = ZobristHash(s_node.N_LINES)
-        initial_hash = zobrist.compute_initial_hash(s_node.l)
+        if getattr(self, 'zobrist', None) is None or getattr(self.zobrist, 'num_lines', 0) != s_node.N_LINES:
+            self.zobrist = ZobristHash(s_node.N_LINES)
+        
+        # Clear table if it gets too huge across many moves to prevent memory leak and maintain TT age
+        if len(self.zobrist.table) > 1000000:
+            self.zobrist.clear()
+            
+        initial_hash = self.zobrist.compute_initial_hash(s_node.l)
         
         end_time = time.time() + self.time_limit
         best_move_overall = valid_moves[0]
         
         for current_depth in range(1, max_depth + 1):
-            tt_backup = zobrist.table.copy()
             try:
                 move, _ = AlphaBetaPlayer.alpha_beta_search(
                     s_node       = s_node,
@@ -77,16 +83,48 @@ class AlphaBetaPlayer(BaseAgent):
                     alpha        = -inf,
                     beta         = inf,
                     maximize     = True,
-                    zobrist      = zobrist,
+                    zobrist      = self.zobrist,
                     current_hash = initial_hash,
                     end_time     = end_time
                 )
-                best_move_overall = move
+                if move is not None:
+                    best_move_overall = move
             except TimeoutError:
-                zobrist.table = tt_backup
                 break
                 
         return best_move_overall
+
+    @staticmethod
+    def evaluate(s, maximize):
+        player = s.current_player if maximize else -s.current_player
+
+        my_boxes = int((s.b == player).sum())
+        opp_boxes = int((s.b == -player).sum())
+
+        value = 0
+        value += (my_boxes - opp_boxes) * 100
+
+        unsafe = 0
+        chains = 0
+
+        for r in range(s.SIZE):
+            for c in range(s.SIZE):
+                if s.b[r][c] == 0:
+                    lines = s.get_lines_of_box((r,c))
+                    filled = sum(1 for ln in lines if s.l[ln] != 0)
+                    if filled == 3:
+                        unsafe += 1
+                    if filled == 2:
+                        chains += 1
+
+        # avoid creating opportunities
+        value -= unsafe * 50
+        # chain control
+        value -= chains * 5
+        # mobility
+        value += len(s.get_valid_moves())
+
+        return value
 
     @staticmethod
     def alpha_beta_search(s_node: DotsAndBoxesGame,
@@ -111,11 +149,9 @@ class AlphaBetaPlayer(BaseAgent):
             opponent_boxes = int((s_node.b == -player).sum())
 
             if not s_node.is_running():
-                if player_boxes > opponent_boxes: return a_latest,  10000
-                if player_boxes < opponent_boxes: return a_latest, -10000
-                return a_latest, 0
+                return a_latest, (player_boxes - opponent_boxes) * 10000
 
-            return a_latest, player_boxes - opponent_boxes
+            return a_latest, AlphaBetaPlayer.evaluate(s_node, maximize)
 
         # --- TT Lookup ---
         original_alpha = alpha
@@ -143,7 +179,8 @@ class AlphaBetaPlayer(BaseAgent):
             valid_moves.remove(tt_best_move)
 
         greedy_moves = []
-        remaining_moves = []
+        safe_moves = []
+        sacrifice_moves = []
         
         for move in valid_moves:
             is_greedy = False
@@ -152,14 +189,46 @@ class AlphaBetaPlayer(BaseAgent):
                 if sum(1 for ln in lines if s_node.l[ln] != 0) == 3:
                     is_greedy = True
                     break
+                    
             if is_greedy:
                 greedy_moves.append(move)
+                continue
+                
+            # Check if it creates danger
+            s_node.execute_move(move)
+            try:
+                creates_danger = False
+                for b_r in range(s_node.SIZE):
+                    for b_c in range(s_node.SIZE):
+                        if s_node.b[b_r][b_c] == 0:
+                            b_lines = s_node.get_lines_of_box((b_r, b_c))
+                            if sum(1 for ln in b_lines if s_node.l[ln] != 0) == 3:
+                                creates_danger = True
+                                break
+                    if creates_danger:
+                        break
+            finally:
+                s_node.undo_move()
+                
+            if creates_danger:
+                sacrifice_moves.append(move)
             else:
-                remaining_moves.append(move)
+                safe_moves.append(move)
 
-        random.shuffle(remaining_moves)
+        def heuristic_score(m):
+            s_node.execute_move(m)
+            try:
+                score = AlphaBetaPlayer.evaluate(s_node, maximize)
+                return score if maximize else -score
+            finally:
+                s_node.undo_move()
+
+        safe_moves.sort(key=heuristic_score, reverse=True)
+        sacrifice_moves.sort(key=heuristic_score, reverse=True)
+
         ordered_moves.extend(greedy_moves)
-        ordered_moves.extend(remaining_moves)
+        ordered_moves.extend(safe_moves)
+        ordered_moves.extend(sacrifice_moves)
         valid_moves = ordered_moves
 
         # --- Search (no deepcopy — uses execute_move / undo_move) ---

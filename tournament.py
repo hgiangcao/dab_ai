@@ -50,6 +50,12 @@ def create_agent(name: str, size: int):
     elif name == "MCTS (0.5s)":
         from bots.mcts_x import MCTSGAgent
         return MCTSGAgent(name=name, time_limit=0.5)
+    elif name == "Greedy":
+        from bots.greedy import GreedyPlayer
+        return GreedyPlayer(name=name)
+    elif name == "Greedy Chain":
+        from bots.greedy_improve import GreedyChainPlayer
+        return GreedyChainPlayer(name=name)
     else:
         raise ValueError(f"Unknown agent name: {name}")
 
@@ -116,13 +122,13 @@ def plot_heatmap(matrix, agent_names, output_path):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Dots and Boxes agents in a round-robin tournament.")
     parser.add_argument("--size", type=int, default=5, help="Grid size of the Dots and Boxes board (default: 3).")
-    parser.add_argument("--games", type=int, default=20, help="Number of games to play per matchup (default: 20).")
+    parser.add_argument("--games", type=int, default=10, help="Number of games to play per matchup (default: 20).")
     parser.add_argument("--workers", type=int, default=None, help="Number of parallel worker processes (default: cpu_count - 1).")
     parser.add_argument("--output", type=str, default="tournament_heatmap.png", help="Path to export the heatmap PNG (default: tournament_heatmap.png).")
     args = parser.parse_args()
 
     # List of agent names to include in the tournament
-    agent_names = ["Random", "Alpha-Beta (0.1s)", "MCTS (0.1s)", "Alpha-Beta (0.5s)", "MCTS (0.5s)"]
+    agent_names = ["Random", "Alpha-Beta (0.1s)", "MCTS (0.1s)", "Alpha-Beta (0.5s)", "MCTS (0.5s)", "Greedy", "Greedy Chain"]
     n_agents = len(agent_names)
     
     # Create the tasks list for all distinct pairs (i < j)
