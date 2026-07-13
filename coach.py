@@ -1,96 +1,127 @@
 import os
-import copy
-import random
 import numpy as np
 from collections import deque
-from mcts import MCTS
+from tqdm import tqdm
+from game import DotsAndBoxesGame
 
-class Coach:
-    def __init__(self, game, nnet, args):
+def play_match(game, p1_agent, p2_agent, num_games):
+    """Arena gatekeeper logic to compare two agents."""
+    p1_wins, p2_wins, draws = 0, 0, 0
+    half_games = num_games // 2
+
+    def play_single(agent1, agent2):
+        players = {1: agent1, -1: agent2}
+        cur_player = 1
+        board = game.getInitBoard()
+        while game.getGameEnded(board, cur_player) == 0:
+            canon_board = game.getCanonicalForm(board, cur_player)
+            action = players[cur_player](canon_board)
+            board, cur_player = game.getNextState(board, cur_player, action)
+        return cur_player * game.getGameEnded(board, cur_player)
+
+    for _ in range(half_games):
+        res = play_single(p1_agent, p2_agent)
+        if res == 1: p1_wins += 1
+        elif res == -1: p2_wins += 1
+        else: draws += 1
+
+    for _ in range(num_games - half_games):
+        res = play_single(p2_agent, p1_agent)
+        if res == -1: p1_wins += 1
+        elif res == 1: p2_wins += 1
+        else: draws += 1
+
+    return p1_wins, p2_wins, draws
+
+class AlphaZeroTrainer:
+    def __init__(self, game, nnet, pnet, mcts_class, args):
         self.game = game
         self.nnet = nnet
+        self.pnet = pnet
+        self.MCTS = mcts_class
         self.args = args
-        self.mcts = MCTS(self.nnet, self.args)
-        self.train_examples_history = [] 
+        self.memory = deque(maxlen=self.args.maxlen_queue)
 
-    def execute_episode(self, fill_percentage=0.0):
-        """
-        Executes one episode of self-play.
-        fill_percentage: Used for backward training. Generates a partially filled board.
-        """
+    def execute_episode(self):
+        """Generates self-play data and applies symmetry augmentation."""
         train_examples = []
-        board = copy.deepcopy(self.game)
+        board = self.game.getInitBoard()
+        cur_player = 1
+        episode_step = 0
+        
+        mcts = self.MCTS(self.game, self.nnet, self.args)
 
-        # Backward Training setup: Pre-fill the board with random valid moves
-        if fill_percentage > 0.0:
-            total_moves = int(board.N_LINES * fill_percentage)
-            for _ in range(total_moves):
-                valid_moves = board.get_valid_moves()
-                if not valid_moves:
-                    break
-                board.execute_move(random.choice(valid_moves))
-        
-        # In AlphaZero, MCTS tree is preserved/reset per episode, not per turn.
-        self.mcts = MCTS(self.nnet, self.args)
-        
-        step = 0
         while True:
-            step += 1
-            temp = int(step < self.args.temp_threshold)
+            episode_step += 1
+            canonical_board = self.game.getCanonicalForm(board, cur_player)
+            temp = int(episode_step < self.args.temp_threshold)
             
-            # 1. Run MCTS to get policy probabilities
-            pi = self.mcts.play(board, temp=temp)
+            pi = mcts.getActionProb(canonical_board, temp=temp)
+            sym_examples = self.game.getSymmetries(canonical_board, pi)
             
-            # 2. Format current state into 4-channel tensor for training memory
-            h, v = board.l_to_h_v(board.get_canonical_lines())
-            p1_boxes = np.where(board.get_canonical_boxes() == 1, 1.0, 0.0)
-            p2_boxes = np.where(board.get_canonical_boxes() == -1, 1.0, 0.0)
-            stacked_board = np.stack([h[:-1, :], v[:, :-1], p1_boxes, p2_boxes], axis=0)
-            
-            # 3. Store the state, current player, and policy
-            train_examples.append([stacked_board, board.current_player, pi, None])
-            
-            # 4. Pick a move and execute
+            for sym_board, sym_pi in sym_examples:
+                train_examples.append([sym_board, cur_player, sym_pi, None])
+
             action = np.random.choice(len(pi), p=pi)
-            board.execute_move(action)
-            
-            # 5. Check if game is over
-            if not board.is_running():
-                # Assign actual game outcome to all recorded moves
-                result = board.result
-                return [(
-                    x[0], 
-                    x[2], 
-                    1.0 if x[1] == result else (-1.0 if result != 0 else 0.0)
-                ) for x in train_examples]
+            board, cur_player = self.game.getNextState(board, cur_player, action)
+            r = self.game.getGameEnded(board, cur_player)
+
+            if r != 0:
+                return [(x[0], x[2], r * ((-1) ** (x[1] != cur_player))) for x in train_examples]
 
     def learn(self):
         """
-        Main training loop: Self-play -> Training -> Iteration
+        Training loop matching the continuous-update and baseline-evaluation approach.
         """
-        for i in range(1, self.args.num_iters + 1):
-            print(f"--- Iteration {i}/{self.args.num_iters} ---")
+        starting_iteration = 1
+        evaluation_results = { 'Random': [] } 
+
+        for i in range(starting_iteration, self.args.num_iters + 1):
+            print(f"\n#################### Iteration {i}/{self.args.num_iters} ####################")
             
-            iteration_train_examples = deque([], maxlen=self.args.maxlen_queue)
+            # 1. Self-Play
+            print("------------ Self-Play ------------")
+            iteration_data = []
+            for _ in tqdm(range(self.args.num_eps), desc="Self Play"):
+                iteration_data.append(self.execute_episode())
             
-            # Calculate fill percentage for backward training phase
-            fill_pct = max(0.0, self.args.start_fill_pct - (i * self.args.fill_decay))
+            # 2. Augment Data & Add to Memory
+            augmented_data = self.augment_data(iteration_data)
+            flat_data = [example for game in augmented_data for example in game]
+            self.memory.extend(flat_data)
             
-            for eps in range(self.args.num_eps):
-                iteration_train_examples += self.execute_episode(fill_percentage=fill_pct)
-                
-            self.train_examples_history.append(iteration_train_examples)
+            # 3. Neural Network Training (Delegated to NNetWrapper)
+            print("\n---------- Neural Network Training -----------")
+            self.nnet.train(list(self.memory))
             
-            if len(self.train_examples_history) > self.args.keep_history_iters:
-                self.train_examples_history.pop(0)
-                
-            # Flatten history
-            train_data = []
-            for e in self.train_examples_history:
-                train_data.extend(e)
+            # 4. Model Comparison 
+            print("\n-------------- Model Comparison --------------")
+            nmcts = self.MCTS(self.game, self.nnet, self.args)
+            neural_net_agent = lambda x: np.argmax(nmcts.getActionProb(x, temp=0))
             
-            # Train the neural network
-            self.nnet.train(train_data)
+            random_agent = lambda x: np.random.choice(np.where(self.game.getValidMoves(x, 1) == 1)[0])
             
-            # Save checkpoint
+            wins, losses, draws = play_match(self.game, neural_net_agent, random_agent, self.args.arena_games)
+            evaluation_results['Random'].append((wins, losses, draws))
+            print(f"Vs Random -> Wins: {wins} | Losses: {losses} | Draws: {draws}")
+            
+            # 5. Save Checkpoints (Delegated to NNetWrapper)
+            print("\nSaving Checkpoint...")
             self.nnet.save_checkpoint(folder=self.args.checkpoint_dir, filename=f'checkpoint_{i}.pth.tar')
+            self.nnet.save_checkpoint(folder=self.args.checkpoint_dir, filename='best.pth.tar')
+
+    @staticmethod
+    def augment_data(train_examples_per_game: list):
+        data_augmented = []
+        for train_examples in train_examples_per_game:
+            train_examples_augmented = []
+            for lines, boxes, p, v in train_examples:
+                train_examples_augmented.extend(zip(
+                    DotsAndBoxesGame.get_rotations_and_reflections_lines(lines),
+                    DotsAndBoxesGame.get_rotations_and_reflections_boxes(boxes),
+                    DotsAndBoxesGame.get_rotations_and_reflections_lines(np.asarray(p)),
+                    [v] * 8
+                ))
+            data_augmented.append(train_examples_augmented)
+
+        return data_augmented

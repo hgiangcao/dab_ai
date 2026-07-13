@@ -21,9 +21,13 @@ if __name__ == "__main__":
         'n_simulations': 100,
         'c_puct': 1.0,
         'dirichlet_eps': 0.25,
-        'dirichlet_alpha': 0.3
-    })
+        'dirichlet_alpha': 0.3,
 
+        # Added parameters
+        'arena_games': 40,
+        'update_threshold': 0.55,
+        'device': 'cuda' # or 'cpu'
+})
     game = DotsAndBoxesGame(size=5)
     nnet = NNetWrapper(game, args)
     
