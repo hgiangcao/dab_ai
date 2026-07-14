@@ -27,6 +27,25 @@ for _d in ["incoming", "ready", "training", "used", "merged"]:
 
 @app.on_event("startup")
 def startup_event():
+    # 1. Automatically calculate next run_id based on logs/ folder
+    logs_dir = ROOT / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    existing_runs = [d.name for d in logs_dir.iterdir() if d.is_dir() and d.name.startswith("run_")]
+    max_run = 0
+    for run in existing_runs:
+        try:
+            run_num = int(run.split("_")[1])
+            max_run = max(max_run, run_num)
+        except ValueError:
+            continue
+    next_run = f"run_{max_run + 1}"
+    
+    # 2. Force a fresh version.txt for the new run
+    VERSION_FILE.write_text(f"run: {next_run}\nlast_updated_model: 0\ncurrent_phase: 0\n")
+    print(f"\n===========================================================")
+    print(f"SERVER STARTING NEW EXPERIMENT: {next_run}")
+    print(f"===========================================================\n")
+    
     # Initialize a random model on startup if no model exists to prevent worker deadlock
     info = get_version_info()
     run_dir = ROOT / "logs" / info["run"]
