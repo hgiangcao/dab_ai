@@ -15,7 +15,7 @@ sys.path.append(PROJECT_ROOT)
 import config
 from model import dotdict
 from mcts import MCTS
-from coach import build_worker_chunks, worker_execute_episode_chunk
+from coach import build_worker_chunks, worker_execute_episode_chunk, get_selfplay_executor
 
 class SelfPlayGenerator:
 
@@ -123,35 +123,44 @@ class SelfPlayGenerator:
         phase_decisive = 0
         mp_context = multiprocessing.get_context('spawn')
         
+        max_workers = max(1, min(4, multiprocessing.cpu_count() - 1))
         worker_args_list = build_worker_chunks(
             self.game_size,
             self.latest_model_path,
             MCTS,
             self.args,
             episode_specs,
+            max_workers=max_workers,
         )
         if not worker_args_list:
             print("No games requested; no replay file generated.")
             return None
 
         print(f"Using {len(worker_args_list)} self-play worker processes for {len(episode_specs)} games.")
-        with concurrent.futures.ProcessPoolExecutor(max_workers=len(worker_args_list), mp_context=mp_context) as executor:
-            futures = {executor.submit(worker_execute_episode_chunk, arg): len(arg[4]) for arg in worker_args_list}
-            with tqdm(total=len(episode_specs), desc=f"Self-Play (Phase {current_phase})") as pbar:
-                for future in concurrent.futures.as_completed(futures):
-                    chunk_size = futures[future]
-                    try:
-                        chunk_results = future.result()
-                        for examples, length, depth, latest_won, latest_drawn in chunk_results:
-                            iteration_data.extend(examples)
-                            if not latest_drawn:
-                                phase_decisive += 1
-                                if latest_won:
-                                    phase_wins += 1
-                    except Exception as e:
-                        print(f"Worker execution failed: {e}")
-                    finally:
-                        pbar.update(chunk_size)
+        executor = get_selfplay_executor(
+            self.latest_model_path,
+            MCTS,
+            self.args,
+            self.game_size,
+            max_workers=max_workers,
+            mp_context=mp_context,
+        )
+        futures = {executor.submit(worker_execute_episode_chunk, arg): len(arg[4]) for arg in worker_args_list}
+        with tqdm(total=len(episode_specs), desc=f"Self-Play (Phase {current_phase})") as pbar:
+            for future in concurrent.futures.as_completed(futures):
+                chunk_size = futures[future]
+                try:
+                    chunk_results = future.result()
+                    for examples, length, depth, latest_won, latest_drawn in chunk_results:
+                        iteration_data.extend(examples)
+                        if not latest_drawn:
+                            phase_decisive += 1
+                            if latest_won:
+                                phase_wins += 1
+                except Exception as e:
+                    print(f"Worker execution failed: {e}")
+                finally:
+                    pbar.update(chunk_size)
 
         phase_winrate = phase_wins / phase_decisive if phase_decisive > 0 else 0.5
 

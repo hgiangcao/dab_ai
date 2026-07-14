@@ -10,6 +10,81 @@ import concurrent.futures
 import io
 import torch
 
+_WORKER_SHARED_STATE = None
+_SELFPLAY_EXECUTOR = None
+_SELFPLAY_EXECUTOR_MODEL_SIGNATURE = None
+_SELFPLAY_EXECUTOR_MAX_WORKERS = None
+
+
+def _get_model_signature(model_path):
+    if not model_path or not os.path.exists(model_path):
+        return (model_path, None, None)
+    return (model_path, os.path.getmtime(model_path), os.path.getsize(model_path))
+
+
+def init_worker_process(latest_model_path, mcts_class, args, game_size):
+    """Load the model once per worker process and reuse it across tasks."""
+    global _WORKER_SHARED_STATE
+
+    from game import DotsAndBoxesGame
+    from model import NNetWrapper
+
+    try:
+        torch.set_num_threads(1)
+    except Exception:
+        pass
+    try:
+        torch.set_num_interop_threads(1)
+    except Exception:
+        pass
+
+    dummy_game = DotsAndBoxesGame(size=game_size)
+    nnet = NNetWrapper(dummy_game, args)
+
+    state_dict = torch.load(latest_model_path, map_location='cpu', weights_only=False)
+    nnet.nnet.load_state_dict(state_dict['state_dict'] if 'state_dict' in state_dict else state_dict)
+    nnet.nnet.eval()
+    mcts_latest = mcts_class(nnet, args)
+
+    _WORKER_SHARED_STATE = {
+        "dummy_game": dummy_game,
+        "mcts_latest": mcts_latest,
+    }
+
+
+def get_selfplay_executor(latest_model_path, mcts_class, args, game_size, max_workers=None, mp_context=None):
+    """Create or reuse a process pool for self-play batches."""
+    global _SELFPLAY_EXECUTOR, _SELFPLAY_EXECUTOR_MODEL_SIGNATURE, _SELFPLAY_EXECUTOR_MAX_WORKERS
+
+    if max_workers is None:
+        max_workers = max(1, min(4, multiprocessing.cpu_count() - 1))
+
+    model_signature = _get_model_signature(latest_model_path)
+
+    if (
+        _SELFPLAY_EXECUTOR is not None
+        and _SELFPLAY_EXECUTOR_MODEL_SIGNATURE == model_signature
+        and _SELFPLAY_EXECUTOR_MAX_WORKERS == max_workers
+    ):
+        return _SELFPLAY_EXECUTOR
+
+    if _SELFPLAY_EXECUTOR is not None:
+        _SELFPLAY_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+
+    if mp_context is None:
+        mp_context = multiprocessing.get_context('spawn')
+
+    _SELFPLAY_EXECUTOR = concurrent.futures.ProcessPoolExecutor(
+        max_workers=max_workers,
+        mp_context=mp_context,
+        initializer=init_worker_process,
+        initargs=(latest_model_path, mcts_class, args, game_size),
+    )
+    _SELFPLAY_EXECUTOR_MODEL_SIGNATURE = model_signature
+    _SELFPLAY_EXECUTOR_MAX_WORKERS = max_workers
+    return _SELFPLAY_EXECUTOR
+
+
 def build_worker_chunks(
     game_size,
     latest_model_path,
@@ -23,7 +98,7 @@ def build_worker_chunks(
     if not episode_specs:
         return []
 
-    cpu_workers = max(1, multiprocessing.cpu_count() - 1)
+    cpu_workers = max(1, min(4, multiprocessing.cpu_count() - 1))
     if max_workers is not None:
         cpu_workers = min(cpu_workers, max_workers)
 
@@ -55,27 +130,15 @@ def worker_execute_episode_chunk(worker_args):
     game_size, latest_model_path, mcts_class, args, episode_specs = worker_args
 
     # Must import inside worker to avoid pickle issues under spawn.
-    from game import DotsAndBoxesGame
-    from model import NNetWrapper
     import copy
     import random
 
-    try:
-        torch.set_num_threads(1)
-    except Exception:
-        pass
-    try:
-        torch.set_num_interop_threads(1)
-    except Exception:
-        pass
+    global _WORKER_SHARED_STATE
+    if _WORKER_SHARED_STATE is None:
+        init_worker_process(latest_model_path, mcts_class, args, game_size)
 
-    dummy_game = DotsAndBoxesGame(size=game_size)
-    nnet = NNetWrapper(dummy_game, args)
-
-    state_dict = torch.load(latest_model_path, map_location='cpu', weights_only=False)
-    nnet.nnet.load_state_dict(state_dict['state_dict'] if 'state_dict' in state_dict else state_dict)
-    nnet.nnet.eval()
-    mcts_latest = mcts_class(nnet, args)
+    dummy_game = _WORKER_SHARED_STATE["dummy_game"]
+    mcts_latest = _WORKER_SHARED_STATE["mcts_latest"]
 
     opponent_cache = {}
 
