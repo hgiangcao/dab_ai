@@ -10,129 +10,208 @@ import concurrent.futures
 import io
 import torch
 
+def build_worker_chunks(
+    game_size,
+    latest_model_path,
+    mcts_class,
+    args,
+    episode_specs,
+    max_workers=None,
+    target_games_per_worker=4,
+):
+    """Create chunked self-play worker args so each process can reuse its model load."""
+    if not episode_specs:
+        return []
+
+    cpu_workers = max(1, multiprocessing.cpu_count() - 1)
+    if max_workers is not None:
+        cpu_workers = min(cpu_workers, max_workers)
+
+    target_games_per_worker = max(1, target_games_per_worker)
+    chunk_limited_workers = (len(episode_specs) + target_games_per_worker - 1) // target_games_per_worker
+    num_workers = max(1, min(len(episode_specs), cpu_workers, chunk_limited_workers))
+    chunk_size = (len(episode_specs) + num_workers - 1) // num_workers
+    return [
+        (game_size, latest_model_path, mcts_class, args, episode_specs[i:i + chunk_size])
+        for i in range(0, len(episode_specs), chunk_size)
+    ]
+
+
 def worker_execute_episode(worker_args):
-    """Generates self-play data using an isolated worker process."""
+    """Compatibility wrapper for code that still submits one episode per task."""
     game_size, latest_model_path, mcts_class, args, game_sequence, start_fill_pct, opp_type, opp_path = worker_args
-    
-    # Must import inside worker to avoid pickle issues
+    results = worker_execute_episode_chunk((
+        game_size,
+        latest_model_path,
+        mcts_class,
+        args,
+        [(game_sequence, start_fill_pct, opp_type, opp_path)],
+    ))
+    return results[0]
+
+
+def worker_execute_episode_chunk(worker_args):
+    """Generates multiple self-play games after loading models once in this process."""
+    game_size, latest_model_path, mcts_class, args, episode_specs = worker_args
+
+    # Must import inside worker to avoid pickle issues under spawn.
     from game import DotsAndBoxesGame
     from model import NNetWrapper
     import copy
     import random
-    
+
+    try:
+        torch.set_num_threads(1)
+    except Exception:
+        pass
+    try:
+        torch.set_num_interop_threads(1)
+    except Exception:
+        pass
+
     dummy_game = DotsAndBoxesGame(size=game_size)
     nnet = NNetWrapper(dummy_game, args)
-    
-    # Load latest model from path safely
+
     state_dict = torch.load(latest_model_path, map_location='cpu', weights_only=False)
     nnet.nnet.load_state_dict(state_dict['state_dict'] if 'state_dict' in state_dict else state_dict)
     nnet.nnet.eval()
     mcts_latest = mcts_class(nnet, args)
-    
-    # Initialize opponent
-    if opp_type == "self":
-        agent_opp = None
-    elif opp_type in ["best", "past"]:
-        opp_net = NNetWrapper(dummy_game, args)
-        opp_state_dict = torch.load(opp_path, map_location='cpu', weights_only=False)
-        opp_net.nnet.load_state_dict(opp_state_dict['state_dict'] if 'state_dict' in opp_state_dict else opp_state_dict)
-        opp_net.nnet.eval()
-        mcts_opp = mcts_class(opp_net, args)
-        def agent_opp(g, t):
-            pi = mcts_opp.play(g, temp=t)
-            return pi, mcts_opp.max_depth_reached
-    elif opp_type == "alpha_beta_0.1s":
-        from bots.alpha_beta import AlphaBetaPlayer
-        baseline = AlphaBetaPlayer(name="AlphaBeta", time_limit=0.1)
-        def agent_opp(g, t):
-            move = baseline.get_move(copy.deepcopy(g))
-            pi = np.zeros(g.N_LINES, dtype=np.float32)
-            pi[move] = 1.0
-            return pi, 0
-    elif opp_type == "mcts_0.1s":
-        from bots.mcts_x import MCTSGAgent
-        baseline = MCTSGAgent(name="MCTS", time_limit=0.1)
-        def agent_opp(g, t):
-            move = baseline.get_move(copy.deepcopy(g))
-            pi = np.zeros(g.N_LINES, dtype=np.float32)
-            pi[move] = 1.0
-            return pi, 0
-    elif opp_type == "random":
-        import random as rand
-        def agent_opp(g, t):
-            valid_moves = g.get_valid_moves()
-            move = rand.choice(valid_moves) if valid_moves else 0
-            pi = np.zeros(g.N_LINES, dtype=np.float32)
-            pi[move] = 1.0
-            return pi, 0
-    elif opp_type == "greedy":
-        from bots.greedy import GreedyPlayer
-        baseline = GreedyPlayer(name="Greedy")
-        def agent_opp(g, t):
-            move = baseline.get_move(copy.deepcopy(g))
-            pi = np.zeros(g.N_LINES, dtype=np.float32)
-            pi[move] = 1.0
-            return pi, 0
-    elif opp_type == "greedy_chain":
-        from bots.greedy_improve import GreedyChainPlayer
-        baseline = GreedyChainPlayer(name="GreedyChain")
-        def agent_opp(g, t):
-            move = baseline.get_move(copy.deepcopy(g))
-            pi = np.zeros(g.N_LINES, dtype=np.float32)
-            pi[move] = 1.0
-            return pi, 0
-            
-    p1_is_latest = random.choice([True, False])
-    
-    train_examples = []
-    game = DotsAndBoxesGame(size=game_size, starting_player=1)
-    
-    # Reverse Curriculum Logic: Pre-fill the board using the historical log sequence
-    if game_sequence is not None and start_fill_pct >= 0.001:
-        target_move_index = int(len(game_sequence) * start_fill_pct)
-        for move in game_sequence[:target_move_index]:
-            game.execute_move(move)
-            
-    episode_step = 0
-    depths = []
 
-    while game.is_running():
-        episode_step += 1
-        temp = int(episode_step < args.temp_threshold)
-        
-        is_latest_turn = (game.current_player == 1) == p1_is_latest
-        
-        if is_latest_turn or opp_type == "self":
-            pi = mcts_latest.play(game, temp=temp)
-            depths.append(mcts_latest.max_depth_reached)
-            
-            canonical_lines = game.get_canonical_lines()
-            canonical_boxes = game.get_canonical_boxes()
-            train_examples.append([canonical_lines, canonical_boxes, game.current_player, pi, None])
-            
-            action = np.random.choice(len(pi), p=pi)
+    opponent_cache = {}
+
+    def get_opponent(opp_type, opp_path):
+        if opp_type == "self":
+            return None
+
+        key = (opp_type, opp_path)
+        if key in opponent_cache:
+            return opponent_cache[key]
+
+        if opp_type in ["best", "past"]:
+            opp_net = NNetWrapper(dummy_game, args)
+            opp_state_dict = torch.load(opp_path, map_location='cpu', weights_only=False)
+            opp_net.nnet.load_state_dict(opp_state_dict['state_dict'] if 'state_dict' in opp_state_dict else opp_state_dict)
+            opp_net.nnet.eval()
+            mcts_opp = mcts_class(opp_net, args)
+
+            def agent_opp(g, t):
+                pi = mcts_opp.play(g, temp=t, add_root_noise=True)
+                return pi, mcts_opp.max_depth_reached
+
+        elif opp_type == "alpha_beta_0.1s":
+            from bots.alpha_beta import AlphaBetaPlayer
+            baseline = AlphaBetaPlayer(name="AlphaBeta", time_limit=0.1)
+
+            def agent_opp(g, t):
+                move = baseline.get_move(copy.deepcopy(g))
+                pi = np.zeros(g.N_LINES, dtype=np.float32)
+                pi[move] = 1.0
+                return pi, 0
+
+        elif opp_type == "mcts_0.1s":
+            from bots.mcts_x import MCTSGAgent
+            baseline = MCTSGAgent(name="MCTS", time_limit=0.1)
+
+            def agent_opp(g, t):
+                move = baseline.get_move(copy.deepcopy(g))
+                pi = np.zeros(g.N_LINES, dtype=np.float32)
+                pi[move] = 1.0
+                return pi, 0
+
+        elif opp_type == "random":
+            import random as rand
+
+            def agent_opp(g, t):
+                valid_moves = g.get_valid_moves()
+                move = rand.choice(valid_moves) if valid_moves else 0
+                pi = np.zeros(g.N_LINES, dtype=np.float32)
+                pi[move] = 1.0
+                return pi, 0
+
+        elif opp_type == "greedy":
+            from bots.greedy import GreedyPlayer
+            baseline = GreedyPlayer(name="Greedy")
+
+            def agent_opp(g, t):
+                move = baseline.get_move(copy.deepcopy(g))
+                pi = np.zeros(g.N_LINES, dtype=np.float32)
+                pi[move] = 1.0
+                return pi, 0
+
+        elif opp_type == "greedy_chain":
+            from bots.greedy_improve import GreedyChainPlayer
+            baseline = GreedyChainPlayer(name="GreedyChain")
+
+            def agent_opp(g, t):
+                move = baseline.get_move(copy.deepcopy(g))
+                pi = np.zeros(g.N_LINES, dtype=np.float32)
+                pi[move] = 1.0
+                return pi, 0
+
         else:
-            pi, depth = agent_opp(game, temp)
-            if depth > 0: depths.append(depth)
-            
-            # We do NOT append to train_examples for opponents (unless opp_type == "self"),
-            # because we only train the network on data generated by the *latest* network policy.
-            action = np.random.choice(len(pi), p=pi)
-            
-        game.execute_move(action)
+            raise ValueError(f"Unknown opponent type: {opp_type}")
 
-    r = game.result
-    avg_depth = sum(depths) / len(depths) if depths else 0
-    
-    # Process final reward from perspective of player who played that turn
-    final_examples = []
-    for x in train_examples:
-        val = r if x[2] == 1 else -r
-        final_examples.append((x[0], x[1], x[3], val))
-        
-    latest_won = (r == 1 if p1_is_latest else r == -1)
-    latest_drawn = (r == 0)
-    return final_examples, episode_step, avg_depth, latest_won, latest_drawn
+        opponent_cache[key] = agent_opp
+        return agent_opp
+
+    def run_episode(game_sequence, start_fill_pct, opp_type, opp_path):
+        if opp_type in ["best", "past"] and opp_path is None:
+            opp_type = "self"
+
+        agent_opp = get_opponent(opp_type, opp_path)
+        p1_is_latest = random.choice([True, False])
+
+        train_examples = []
+        game = DotsAndBoxesGame(size=game_size, starting_player=1)
+
+        # Reverse Curriculum Logic: Pre-fill the board using the historical log sequence.
+        if game_sequence is not None and start_fill_pct >= 0.001:
+            target_move_index = int(len(game_sequence) * start_fill_pct)
+            for move in game_sequence[:target_move_index]:
+                game.execute_move(move)
+
+        episode_step = 0
+        depths = []
+
+        while game.is_running():
+            episode_step += 1
+            temp = int(episode_step < args.temp_threshold)
+
+            is_latest_turn = (game.current_player == 1) == p1_is_latest
+
+            if is_latest_turn or opp_type == "self":
+                pi = mcts_latest.play(game, temp=temp, add_root_noise=True)
+                depths.append(mcts_latest.max_depth_reached)
+
+                canonical_lines = game.get_canonical_lines()
+                canonical_boxes = game.get_canonical_boxes()
+                train_examples.append([canonical_lines, canonical_boxes, game.current_player, pi, None])
+
+                action = np.random.choice(len(pi), p=pi)
+            else:
+                pi, depth = agent_opp(game, temp)
+                if depth > 0:
+                    depths.append(depth)
+
+                # We only train the network on data generated by the latest network policy.
+                action = np.random.choice(len(pi), p=pi)
+
+            game.execute_move(action)
+
+        r = game.result
+        avg_depth = sum(depths) / len(depths) if depths else 0
+
+        final_examples = []
+        for x in train_examples:
+            val = r if x[2] == 1 else -r
+            final_examples.append((x[0], x[1], x[3], val))
+
+        latest_won = (r == 1 if p1_is_latest else r == -1)
+        latest_drawn = (r == 0)
+        return final_examples, episode_step, avg_depth, latest_won, latest_drawn
+
+    return [run_episode(*episode_spec) for episode_spec in episode_specs]
+
 
 def worker_play_single(worker_args):
     """Plays a single arena match in an isolated worker process."""
@@ -151,7 +230,7 @@ def worker_play_single(worker_args):
     nnet.nnet.eval()
     mcts1 = mcts_class(nnet, args)
     def agent1(g):
-        pi = mcts1.play(g, temp=0)
+        pi = mcts1.play(g, temp=0, add_root_noise=False)
         return np.argmax(pi)
         
     # Init opponent (Agent 2)
@@ -188,7 +267,7 @@ def worker_play_single(worker_args):
         pnet.nnet.eval()
         mcts2 = mcts_class(pnet, args)
         def agent2(g):
-            pi = mcts2.play(g, temp=0)
+            pi = mcts2.play(g, temp=0, add_root_noise=False)
             return np.argmax(pi)
             
     game = DotsAndBoxesGame(size=game_size, starting_player=1)
@@ -280,7 +359,7 @@ class AlphaZeroTrainer:
             else:
                 sampled_sequences = [None] * self.args.num_eps
             
-            worker_args_list = []
+            episode_specs = []
             
             phases_config = [
                 [("random", 0.01)],
@@ -309,7 +388,7 @@ class AlphaZeroTrainer:
                     opp_path = random.choice(past_checkpoints) if past_checkpoints else None
                     if opp_path is None: opp_type = "self"
                     
-                worker_args_list.append((self.game_size, temp_latest_path, self.MCTS, self.args, seq, start_fill_pct, opp_type, opp_path))
+                episode_specs.append((seq, start_fill_pct, opp_type, opp_path))
             
             # 1. Self-Play (Parallelized)
             print(f"------------ Self-Play (Fill: {start_fill_pct*100:.1f}%) ------------")
@@ -317,17 +396,31 @@ class AlphaZeroTrainer:
             episode_lengths = []
             episode_depths = []
             
-            with concurrent.futures.ProcessPoolExecutor(max_workers=8, mp_context=mp_context) as executor:
-                futures = [executor.submit(worker_execute_episode, arg) for arg in worker_args_list]
-                for future in tqdm(concurrent.futures.as_completed(futures), total=self.args.num_eps, desc="Self Play"):
-                    examples, length, depth, latest_won, latest_drawn = future.result()
-                    iteration_data.append(examples)
-                    episode_lengths.append(length)
-                    episode_depths.append(depth)
-                    if not latest_drawn:
-                        self.phase_decisive += 1
-                        if latest_won:
-                            self.phase_wins += 1
+            worker_args_list = build_worker_chunks(
+                self.game_size,
+                temp_latest_path,
+                self.MCTS,
+                self.args,
+                episode_specs,
+                max_workers=8,
+            )
+            print(f"Using {len(worker_args_list)} self-play worker processes for {len(episode_specs)} games.")
+
+            with concurrent.futures.ProcessPoolExecutor(max_workers=len(worker_args_list), mp_context=mp_context) as executor:
+                futures = {executor.submit(worker_execute_episode_chunk, arg): len(arg[4]) for arg in worker_args_list}
+                with tqdm(total=len(episode_specs), desc="Self Play") as pbar:
+                    for future in concurrent.futures.as_completed(futures):
+                        chunk_size = futures[future]
+                        chunk_results = future.result()
+                        for examples, length, depth, latest_won, latest_drawn in chunk_results:
+                            iteration_data.append(examples)
+                            episode_lengths.append(length)
+                            episode_depths.append(depth)
+                            if not latest_drawn:
+                                self.phase_decisive += 1
+                                if latest_won:
+                                    self.phase_wins += 1
+                        pbar.update(chunk_size)
                             
             # Calculate and log phase winrate
             phase_winrate = self.phase_wins / self.phase_decisive if self.phase_decisive > 0 else 0.5

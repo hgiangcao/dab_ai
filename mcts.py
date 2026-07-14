@@ -27,31 +27,43 @@ class MCTS:
         self.dirichlet_eps = mcts_parameters["dirichlet_eps"]
         self.dirichlet_alpha = mcts_parameters["dirichlet_alpha"]
 
-    def play(self, game_state, temp: int) -> list:
+    def play(self, game_state, temp: int, add_root_noise: bool = False) -> list:
         root = AZNode(parent=None, s=copy.deepcopy(game_state), a=None)
         valid_moves = root.s.get_valid_moves()
-        
-        # FIX: Generate Dirichlet noise ONCE per move decision, not per simulation step
-        dirichlet_noise = np.zeros((root.s.N_LINES,), dtype=np.float32)
-        if len(valid_moves) > 0:
+        self.max_depth_reached = 0
+
+        if not valid_moves:
+            return [0.0] * root.s.N_LINES
+
+        dirichlet_noise = None
+        if add_root_noise and self.dirichlet_eps > 0:
+            dirichlet_noise = np.zeros((root.s.N_LINES,), dtype=np.float64)
             dirichlet_noise[valid_moves] = np.random.dirichlet([self.dirichlet_alpha] * len(valid_moves))
 
-        # Track maximum depth reached in this play step
-        self.max_depth_reached = 0
         for _ in range(self.n_simulations):
             self.search(root, is_root=True, dirichlet_noise=dirichlet_noise, current_depth=0)
 
-        counts = [root.N[a] if a in root.N else 0 for a in range(root.s.N_LINES)]
+        counts = np.array([root.N.get(a, 0) for a in range(root.s.N_LINES)], dtype=np.float64)
+        counts_sum = float(counts.sum())
+
+        if counts_sum == 0:
+            fallback = self._root_policy(root, valid_moves, dirichlet_noise)
+            if temp == 0:
+                probs = np.zeros(root.s.N_LINES, dtype=np.float64)
+                probs[int(np.argmax(fallback))] = 1.0
+                return probs.tolist()
+            return fallback.tolist()
 
         if temp == 0:
-            probs = [0] * len(counts)
-            probs[np.array(counts).argmax()] = 1
-            return probs
+            probs = np.zeros(root.s.N_LINES, dtype=np.float64)
+            probs[int(np.argmax(counts))] = 1.0
+            return probs.tolist()
 
-        probs = [n ** (1. / temp) for n in counts]
+        probs = counts ** (1.0 / temp)
         total_sum = float(sum(probs))
-        probs = [p / total_sum for p in probs] if total_sum > 0 else [1.0/len(probs)] * len(probs)
-        return probs
+        if total_sum > 0:
+            return (probs / total_sum).tolist()
+        return self._uniform_policy(root.s.N_LINES, valid_moves).tolist()
 
     def search(self, node: AZNode, is_root: bool = False, dirichlet_noise: np.ndarray = None, current_depth: int = 0) -> float:
         self.max_depth_reached = max(self.max_depth_reached, current_depth)
@@ -87,7 +99,10 @@ class MCTS:
             
             # Call our model wrapper's predict function
             p, v = self.model.predict(stacked_board)
-            node.P = p
+            v = float(np.asarray(v).reshape(-1)[0])
+
+            valid_moves = node.s.get_valid_moves()
+            node.P = self._mask_and_normalize_policy(p, node.s.N_LINES, valid_moves)
             return v
 
         a = self.select(node, is_root, dirichlet_noise)
@@ -108,9 +123,10 @@ class MCTS:
         N_sum = sum(node.N.values())
         N_sqrt = math.sqrt(N_sum) if N_sum > 0 else 1
 
-        P = node.P if not is_root else (1 - self.dirichlet_eps) * node.P + self.dirichlet_eps * dirichlet_noise
+        valid_moves = node.s.get_valid_moves()
+        P = self._root_policy(node, valid_moves, dirichlet_noise) if is_root else node.P
 
-        for a in node.s.get_valid_moves():
+        for a in valid_moves:
             p = P[a]
             q = node.Q[a] if a in node.N else 0.0
             n = node.N[a] if a in node.N else 0
@@ -119,6 +135,8 @@ class MCTS:
             if q + u > maximum:
                 maximum = q + u
                 a_max = a
+        if a_max == -1:
+            raise RuntimeError("MCTS select called with no valid moves")
         return a_max
 
     def expand(self, node: AZNode, a: int) -> AZNode:
@@ -138,8 +156,39 @@ class MCTS:
         node.Q[a] = (n * node.Q[a] + v) / (n + 1)
         node.N[a] += 1
 
+    @staticmethod
+    def _uniform_policy(n_actions: int, valid_moves: list) -> np.ndarray:
+        probs = np.zeros(n_actions, dtype=np.float64)
+        if valid_moves:
+            probs[valid_moves] = 1.0 / len(valid_moves)
+        return probs
 
-import numpy as np
+    def _mask_and_normalize_policy(self, policy, n_actions: int, valid_moves: list) -> np.ndarray:
+        if policy is None:
+            return self._uniform_policy(n_actions, valid_moves)
+
+        policy = np.asarray(policy, dtype=np.float64).reshape(-1)
+        if policy.shape[0] != n_actions:
+            raise ValueError(f"Model policy has length {policy.shape[0]}, expected {n_actions}")
+
+        probs = np.zeros(n_actions, dtype=np.float64)
+        policy = np.where(np.isfinite(policy), policy, 0.0)
+        policy = np.maximum(policy, 0.0)
+        probs[valid_moves] = policy[valid_moves]
+
+        total = float(probs.sum())
+        if total > 0:
+            return probs / total
+        return self._uniform_policy(n_actions, valid_moves)
+
+    def _root_policy(self, node: AZNode, valid_moves: list, dirichlet_noise: np.ndarray = None) -> np.ndarray:
+        policy = node.P
+        if dirichlet_noise is not None:
+            base_policy = self._mask_and_normalize_policy(policy, node.s.N_LINES, valid_moves)
+            policy = (1.0 - self.dirichlet_eps) * base_policy + self.dirichlet_eps * dirichlet_noise
+        return self._mask_and_normalize_policy(policy, node.s.N_LINES, valid_moves)
+
+
 from agent_interface import BaseAgent
 
 class MCTSAgent(BaseAgent):
@@ -149,5 +198,5 @@ class MCTSAgent(BaseAgent):
 
     def get_move(self, game_state) -> int:
         # Use temp=0 to always select the strongest move during evaluation/play
-        probs = self.mcts.play(game_state, temp=0)
+        probs = self.mcts.play(game_state, temp=0, add_root_noise=False)
         return int(np.argmax(probs))
