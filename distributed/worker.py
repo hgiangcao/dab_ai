@@ -28,8 +28,9 @@ def main():
     generator = SelfPlayGenerator()
 
     local_version = -1
-
+    epoch = -1
     while True:
+        epoch+=1
         print("=" * 60)
 
         #
@@ -65,7 +66,8 @@ def main():
                 save_dir=replay_dir,
                 worker_id=args.worker,
                 model_version=local_version,
-                current_phase=server_phase
+                current_phase=server_phase,
+                epoch=epoch
             )
         except Exception as e:
             print(f"Error during self-play generation: {e}")

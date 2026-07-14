@@ -154,7 +154,8 @@ def run_training_iteration(writer=None, iteration=0):
             writer.add_scalar('Curriculum/Phase_Winrate', max_client_winrate, iteration)
             writer.add_scalar('Curriculum/Current_Phase', current_phase, iteration)
             
-        if max_client_winrate >= 0.60 and current_phase < 5:
+        # if max_client_winrate >= 0.60 and current_phase < 5:
+        if iteration % 5 == 0:
             print(f"\n===========================================================")
             print(f"Phase {current_phase} cleared (Winrate: {max_client_winrate:.1%})!")
             print(f"Advancing to Phase {current_phase + 1}...")

@@ -67,8 +67,8 @@ class SelfPlayGenerator:
         """Loads the path to the latest model to be used by the multiprocessing workers."""
         self.latest_model_path = os.path.abspath(checkpoint)
 
-    def play_games(self, num_games, save_dir, worker_id="worker", model_version=0, current_phase=0):
-        print(f"Starting generation of {num_games} games at Phase {current_phase}...")
+    def play_games(self, num_games, save_dir, worker_id="worker", model_version=0, current_phase=0,epoch =0):
+        print(f"epoch {epoch} - Starting generation of {num_games} games at Phase {current_phase}...")
 
         # 2. Determine opponent pool based on phase (matching coach.py configuration)
         phases_config = [
@@ -88,7 +88,7 @@ class SelfPlayGenerator:
         normalized_probs = [p / total_prob for _, p in current_pool]
         
         # Reverse Curriculum Fill % approximation based on model version (iterations)
-        start_fill_pct = max(0.0, 0.70 - (0.70 / (len(phases_config) - 1)) * current_phase)
+        start_fill_pct = max(0.0, 0.70 - (0.70 / 10) * epoch)
         
         if self.json_logs and start_fill_pct >= 0.001:
             sampled_sequences = [random.choice(self.json_logs) for _ in range(num_games)]
