@@ -58,7 +58,7 @@ MIN_REPLAY_SIZE = 5000
 # ===================
 
 # arena_games from main.py
-EVAL_GAMES = 100
+EVAL_GAMES = 10
 
 # update_threshold from main.py
 PROMOTION_THRESHOLD = 0.55

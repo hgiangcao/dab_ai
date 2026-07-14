@@ -86,8 +86,6 @@ def get_latest_model_path(version=None):
     if version is None:
         version = get_current_version()
     
-    
-    print ("Load last model",config.get_current_model_dir(), f"checkpoint_{version}.pth.tar")
     return os.path.join(config.get_current_model_dir(), f"checkpoint_{version}.pth.tar")
 
 def save_latest_model(model):

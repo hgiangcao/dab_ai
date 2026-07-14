@@ -75,14 +75,19 @@ def train_network(replay_data, output_model_path):
     dummy_game = DotsAndBoxesGame(size=game_size)
     nnet = NNetWrapper(dummy_game, train_args)
     
-    # Load best model if exists to continue training
-    best_model_path = model_manager.get_best_model_path()
-    state_dict = model_manager.load_model(best_model_path)
+    # Load latest candidate model to continue continuous training
+    candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
+    if os.path.exists(candidate_path):
+        load_path = candidate_path
+    else:
+        load_path = model_manager.get_latest_model_path()
+        
+    state_dict = model_manager.load_model(load_path)
     if state_dict:
         nnet.nnet.load_state_dict(state_dict)
-        print(f"Loaded existing best model weights from {best_model_path}.")
+        print(f"Loaded existing model weights from {load_path} to continue training.")
     else:
-        print("No previous best model found. Initializing randomly.")
+        print("No previous model found. Initializing randomly.")
         
     print(f"Augmenting dataset of {len(replay_data)} raw states...")
     augmented_memory = augment_data(replay_data)
@@ -118,7 +123,7 @@ def run_training_iteration(writer=None, iteration=0):
     6. Mark training files as used
     """
     print("\n" + "="*60)
-    print("STARTING NEW TRAINING ITERATION")
+    print("STARTING NEW TRAINING ITERATION", iteration)
     print("="*60)
     
     # 1. Validate and promote incoming files to ready

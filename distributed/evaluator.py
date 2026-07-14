@@ -227,18 +227,17 @@ def evaluate_new_model():
     4. Run games vs baselines
     5. Decide promotion
     """
-    latest_path = model_manager.get_latest_model_path()
     best_path = model_manager.get_best_model_path()
     
     # In distributed mode, trainer saves candidate model temporarily 
     # to evaluate before officially committing it as a version.
     candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
-    if not os.path.exists(candidate_path):
-        candidate_path = latest_path
         
     if not os.path.exists(candidate_path):
         print(f"No candidate model found at {candidate_path} for evaluation.")
         return False, 0.0, {}
+        
+    print(f"Evaluating candidate model: {candidate_path}")
         
     print(f"\n================ EVALUATION VS BEST ({config.EVAL_GAMES} games) ================")
     result = evaluate_model(candidate_path, best_path, config.EVAL_GAMES)
