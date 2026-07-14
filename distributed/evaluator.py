@@ -24,10 +24,10 @@ eval_args = dotdict({
     'num_channels': 256,
     'num_res_blocks': 10, 
     'l2_reg': 1e-4,
-    'n_simulations': 100,
-    'c_puct': 1.0,
+    'n_simulations': config.MCTS_NUM_SIMULATIONS,
+    'c_puct': config.MCTS_C_PUCT,
     'dirichlet_eps': 0.0,
-    'dirichlet_alpha': 0.3,
+    'dirichlet_alpha': config.MCTS_DIRICHLET_ALPHA,
     'device': 'cpu'  # CPU allows us to run evaluation in parallel efficiently
 })
 

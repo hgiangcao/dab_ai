@@ -12,6 +12,7 @@ from tqdm import tqdm
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 
+import config
 from model import dotdict
 from mcts import MCTS
 from coach import build_worker_chunks, worker_execute_episode_chunk
@@ -21,26 +22,29 @@ class SelfPlayGenerator:
     def __init__(self):
         self.game_size = 5
         self.args = dotdict({
-            'lr': 0.0005,
-            'epochs': 10,
-            'batch_size': 64,
+            'lr': config.LEARNING_RATE,
+            'epochs': config.EPOCHS,
+            'batch_size': config.BATCH_SIZE,
             'num_channels': 256,
             'num_res_blocks': 10, 
             'l2_reg': 1e-4,
             'num_iters': 1200,
             'num_eps': 100,
             'temp_threshold': 15,
-            'maxlen_queue': 200000,
+            'temperature_initial': 1.0,
+            'temperature_final': 0.0,
+            'temperature_drop_move': 15,
+            'maxlen_queue': config.MAX_REPLAY_SIZE,
             'start_fill_pct': 0.8,
             'fill_decay': 0.05,
             'keep_history_iters': 20,
             'checkpoint_dir': './logs',
-            'n_simulations': 100,
-            'c_puct': 1.0,
-            'dirichlet_eps': 0.25,
-            'dirichlet_alpha': 0.3,
-            'arena_games': 40,
-            'update_threshold': 0.55,
+            'n_simulations': config.MCTS_NUM_SIMULATIONS,
+            'c_puct': config.MCTS_C_PUCT,
+            'dirichlet_eps': config.MCTS_DIRICHLET_EPS,
+            'dirichlet_alpha': config.MCTS_DIRICHLET_ALPHA,
+            'arena_games': config.EVAL_GAMES,
+            'update_threshold': config.PROMOTION_THRESHOLD,
             'device': 'cpu'  # Workers use CPU for highly parallel self-play
         })
         self.latest_model_path = None

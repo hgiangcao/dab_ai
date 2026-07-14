@@ -1,75 +1,55 @@
-import os
+import importlib.util
 from pathlib import Path
 
-# ===================
-# Paths
-# ===================
+ROOT_DIR = Path(__file__).resolve().parent.parent
+CONFIG_PATH = ROOT_DIR / "config.py"
 
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+spec = importlib.util.spec_from_file_location("project_config", CONFIG_PATH)
+if spec is None or spec.loader is None:
+    raise ImportError(f"Unable to load shared config from {CONFIG_PATH}")
 
-# We store our runs in the logs directory (e.g., logs/run_1)
-LOGS_DIR = os.path.join(ROOT_DIR, "logs")
+project_config = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(project_config)
 
-# Replay pipeline root and subfolders
-REPLAY_DIR = os.path.join(ROOT_DIR, "storage", "replay")
-REPLAY_INCOMING = os.path.join(REPLAY_DIR, "incoming")
-REPLAY_READY    = os.path.join(REPLAY_DIR, "ready")
-REPLAY_TRAINING = os.path.join(REPLAY_DIR, "training")
-REPLAY_USED     = os.path.join(REPLAY_DIR, "used")
-REPLAY_MERGED   = os.path.join(REPLAY_DIR, "merged")
+ROOT_DIR = project_config.ROOT_DIR
+LOGS_DIR = project_config.LOGS_DIR
+REPLAY_DIR = project_config.REPLAY_DIR
+REPLAY_INCOMING = project_config.REPLAY_INCOMING
+REPLAY_READY = project_config.REPLAY_READY
+REPLAY_TRAINING = project_config.REPLAY_TRAINING
+REPLAY_USED = project_config.REPLAY_USED
+REPLAY_MERGED = project_config.REPLAY_MERGED
+VERSION_FILE = project_config.VERSION_FILE
 
-# The global version file at the root of the project
-VERSION_FILE = os.path.join(ROOT_DIR, "version.txt")
 
-# Helper function to get the current model directory dynamically
 def get_current_model_dir():
-    run_name = "run_1"
-    if os.path.exists(VERSION_FILE):
-        with open(VERSION_FILE, "r") as f:
-            for line in f:
-                if line.startswith("run:"):
-                    run_name = line.split(":")[1].strip()
-                    break
-    return os.path.join(LOGS_DIR, run_name)
-
-# ===================
-# Training (Matching main.py args)
-# ===================
-
-BATCH_SIZE = 512
-
-EPOCHS = 10
-
-LEARNING_RATE = 0.0005
+    return project_config.get_current_model_dir()
 
 
-# ===================
-# Replay Buffer
-# ===================
+BATCH_SIZE = project_config.BATCH_SIZE
+EPOCHS = project_config.EPOCHS
+LEARNING_RATE = project_config.LEARNING_RATE
+MAX_REPLAY_SIZE = project_config.MAX_REPLAY_SIZE
+MIN_REPLAY_SIZE = project_config.MIN_REPLAY_SIZE
+EVAL_GAMES = project_config.EVAL_GAMES
+PROMOTION_THRESHOLD = project_config.PROMOTION_THRESHOLD
 
-# maxlen_queue from main.py
-MAX_REPLAY_SIZE = 200000
-
-MIN_REPLAY_SIZE = 10000
-
-
-# ===================
-# Evaluation
-# ===================
-
-# arena_games from main.py
-EVAL_GAMES = 20
-
-# update_threshold from main.py
-PROMOTION_THRESHOLD = 0.55
+MCTS_NUM_SIMULATIONS = project_config.MCTS_NUM_SIMULATIONS
+MCTS_C_PUCT = project_config.MCTS_C_PUCT
+MCTS_TEMPERATURE = project_config.MCTS_TEMPERATURE
+MCTS_DIRICHLET_ALPHA = project_config.MCTS_DIRICHLET_ALPHA
+MCTS_DIRICHLET_EPS = project_config.MCTS_DIRICHLET_EPS
 
 
-# ===================
-# Client (Matching server.py endpoints)
-# ===================
+def get_mcts_config():
+    return project_config.get_mcts_config()
 
-MODEL_DOWNLOAD_URL = "/latest_model"
-BEST_MODEL_DOWNLOAD_URL = "/best_model"
 
-VERSION_API = "/version"
-UPLOAD_REPLAY_API = "/upload_replay"
+def get_server_config():
+    return project_config.get_server_config()
+
+
+MODEL_DOWNLOAD_URL = project_config.MODEL_DOWNLOAD_URL
+BEST_MODEL_DOWNLOAD_URL = project_config.BEST_MODEL_DOWNLOAD_URL
+VERSION_API = project_config.VERSION_API
+UPLOAD_REPLAY_API = project_config.UPLOAD_REPLAY_API

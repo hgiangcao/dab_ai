@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 from datetime import datetime
 
+import config as shared_config
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 
@@ -62,10 +63,10 @@ def startup_event():
         import torch
         
         nnet_args = dotdict({
-            'lr': 0.0005,
+            'lr': shared_config.LEARNING_RATE,
             'l2_reg': 1e-4,
-            'epochs': 100,
-            'batch_size': 512,
+            'epochs': shared_config.EPOCHS,
+            'batch_size': shared_config.BATCH_SIZE,
             'num_channels': 256,
             'num_res_blocks': 10,
             'device': 'cpu'
@@ -205,11 +206,4 @@ def status():
 
 @app.get("/config")
 def config():
-
-    return {
-        "num_mcts": 400,
-        "cpuct": 1.5,
-        "temperature": 1.0,
-        "dirichlet_alpha": 0.3,
-        "dirichlet_eps": 0.25
-    }
+    return shared_config.get_server_config()
