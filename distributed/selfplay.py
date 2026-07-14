@@ -87,14 +87,16 @@ class SelfPlayGenerator:
         total_prob = sum(p for _, p in current_pool)
         normalized_probs = [p / total_prob for _, p in current_pool]
         
-        # Reverse Curriculum Fill % approximation based on phase
-        start_fill_pct = max(0.0, 0.70 - (0.70 / 10) * current_phase)
+        # Reverse Curriculum Fill % approximation based on model version (iterations)
+        start_fill_pct = max(0.0, 0.70 - (0.70 / (len(phases_config) - 1)) * current_phase)
         
         if self.json_logs and start_fill_pct >= 0.001:
             sampled_sequences = [random.choice(self.json_logs) for _ in range(num_games)]
         else:
             sampled_sequences = [None] * num_games
+        
         print(start_fill_pct,"RANDOM FILLED MOVES")
+        
         # 3. Setup arguments for multiprocessing
         worker_args_list = []
         for seq in sampled_sequences:
