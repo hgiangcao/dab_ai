@@ -132,6 +132,8 @@ def worker_execute_episode_chunk(worker_args):
     # Must import inside worker to avoid pickle issues under spawn.
     import copy
     import random
+    from game import DotsAndBoxesGame
+    from model import NNetWrapper
 
     global _WORKER_SHARED_STATE
     if _WORKER_SHARED_STATE is None:
