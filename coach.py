@@ -223,7 +223,7 @@ class AlphaZeroTrainer:
         
         # Load Reverse Curriculum Logs
         self.json_logs = []
-        log_path = "logs/game_logs.jsonl"
+        log_path = "game_logs.jsonl"
         expected_moves = 2 * self.game_size * (self.game_size + 1)
         if os.path.exists(log_path):
             with open(log_path, "r") as f:

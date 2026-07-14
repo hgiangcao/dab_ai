@@ -7,3 +7,4 @@ upload_replay/
 worker_data/
 storage/
 *.pt
+*.jsonl

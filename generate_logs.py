@@ -70,7 +70,7 @@ def generate_backward_data_parallel(output_filepath: str, num_games: int, target
             f.flush()
 
 if __name__ == "__main__":
-    OUTPUT_FILE = "logs/game_logs.jsonl"
+    OUTPUT_FILE = "game_logs.jsonl"
     TOTAL_GAMES = 10000
     FILL_PERCENTAGE = 0.75
     NUM_WORKERS = None #None  # Set an integer (e.g. 4) to limit CPU cores, or None to use all-but-one core
