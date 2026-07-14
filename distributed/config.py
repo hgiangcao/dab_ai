@@ -50,7 +50,7 @@ LEARNING_RATE = 0.0005
 # maxlen_queue from main.py
 MAX_REPLAY_SIZE = 200000
 
-MIN_REPLAY_SIZE = 5000
+MIN_REPLAY_SIZE = 10000
 
 
 # ===================
@@ -58,7 +58,7 @@ MIN_REPLAY_SIZE = 5000
 # ===================
 
 # arena_games from main.py
-EVAL_GAMES = 10
+EVAL_GAMES = 20
 
 # update_threshold from main.py
 PROMOTION_THRESHOLD = 0.55

@@ -63,31 +63,15 @@ def augment_data(train_examples):
             
     return data_augmented
 
-def train_network(replay_data, output_model_path):
+def train_network(replay_data, output_model_path, nnet):
     """
     Train AlphaZero network.
     
     Input:
-        replay_file: merged self-play games (loaded as tuples)
-        output_model: path to save trained model
+        replay_data: merged self-play games (loaded as tuples)
+        output_model_path: path to save trained model
+        nnet: the single instance of the Neural Network
     """
-    game_size = 5
-    dummy_game = DotsAndBoxesGame(size=game_size)
-    nnet = NNetWrapper(dummy_game, train_args)
-    
-    # Load latest candidate model to continue continuous training
-    candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
-    if os.path.exists(candidate_path):
-        load_path = candidate_path
-    else:
-        load_path = model_manager.get_latest_model_path()
-        
-    state_dict = model_manager.load_model(load_path)
-    if state_dict:
-        nnet.nnet.load_state_dict(state_dict)
-        print(f"Loaded existing model weights from {load_path} to continue training.")
-    else:
-        print("No previous model found. Initializing randomly.")
         
     print(f"Augmenting dataset of {len(replay_data)} raw states...")
     augmented_memory = augment_data(replay_data)
@@ -112,7 +96,7 @@ def save_training_checkpoint():
     """Save training states. (Currently handled by model_manager.save_latest_model)"""
     pass
 
-def run_training_iteration(writer=None, iteration=0):
+def run_training_iteration(writer=None, iteration=0, nnet=None):
     """
     Execute one complete iteration:
     1. Validate and promote incoming → ready
@@ -181,7 +165,7 @@ def run_training_iteration(writer=None, iteration=0):
     # 4. Train candidate network
     merged_path = replay_manager.merge_replay(claimed_files)
     candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
-    losses = train_network(replay_data, candidate_path)
+    losses = train_network(replay_data, candidate_path, nnet)
     
     if writer:
         writer.add_scalar('Log/Policy_Loss', losses["pi_loss"], iteration)
@@ -241,6 +225,25 @@ def training_loop():
     if os.path.exists(bots_src):
         shutil.copytree(bots_src, os.path.join(code_dir, 'bots'), dirs_exist_ok=True)
     
+    # Initialize the neural network ONCE for continuous use
+    print("Initializing Neural Network for continuous training...")
+    dummy_game = DotsAndBoxesGame(size=5)
+    global_nnet = NNetWrapper(dummy_game, train_args)
+    
+    # Try to load existing state right away
+    candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
+    if os.path.exists(candidate_path):
+        load_path = candidate_path
+    else:
+        load_path = model_manager.get_latest_model_path()
+        
+    state_dict = model_manager.load_model(load_path)
+    if state_dict:
+        global_nnet.nnet.load_state_dict(state_dict)
+        print(f"Loaded existing model weights from {load_path}.")
+    else:
+        print("No previous model found. Initializing randomly.")
+        
     while True:
         try:
             # Check how many replay files are in incoming/ and ready/
@@ -251,7 +254,7 @@ def training_loop():
             
             # Start iteration if we have multiple new files to merge
             if total_files >= 5: 
-                success = run_training_iteration(writer, iteration)
+                success = run_training_iteration(writer, iteration, global_nnet)
                 if not success:
                     print("Iteration skipped. Sleeping 60s...")
                     time.sleep(60)
