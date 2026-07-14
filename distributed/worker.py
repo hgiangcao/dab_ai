@@ -6,22 +6,23 @@ from client import ServerClient
 from selfplay import SelfPlayGenerator
 
 
-SERVER = "172.16.2.31:8000"
-
-WORKER_NAME = "worker01"
-
-LOCAL_DIR = "./worker_data"
-
-MODEL_FILE = os.path.join(LOCAL_DIR, "latest.pt")
-REPLAY_DIR = os.path.join(LOCAL_DIR, "replay")
-
-GAMES_PER_BATCH = 2
-
+import argparse
 
 def main():
-    os.makedirs(REPLAY_DIR, exist_ok=True)
+    parser = argparse.ArgumentParser(description="Distributed Self-Play Worker")
+    parser.add_argument("--server", type=str, default="172.16.2.31:8000", help="Server address (IP:port)")
+    parser.add_argument("--worker", type=str, default="worker01", help="Worker name identifier")
+    parser.add_argument("--games", type=int, default=100, help="Number of games per batch")
+    args = parser.parse_args()
 
-    client = ServerClient(SERVER, WORKER_NAME)
+    # Create worker-specific local directories to prevent collision when running multiple workers locally
+    local_dir = f"./worker_data_{args.worker}"
+    model_file = os.path.join(local_dir, "latest.pt")
+    replay_dir = os.path.join(local_dir, "replay")
+    
+    os.makedirs(replay_dir, exist_ok=True)
+
+    client = ServerClient(args.server, args.worker)
     generator = SelfPlayGenerator()
 
     local_version = -1
@@ -42,8 +43,8 @@ def main():
         if server_version != local_version or generator.latest_model_path is None:
             print(f"Downloading model version {server_version}")
             try:
-                client.download_latest_model(MODEL_FILE)
-                generator.load_model(MODEL_FILE)
+                client.download_latest_model(model_file)
+                generator.load_model(model_file)
                 local_version = server_version
             except Exception as e:
                 print(f"Error downloading model: {e}. Retrying in 10 seconds...")
@@ -55,9 +56,9 @@ def main():
         #
         try:
             replay_file = generator.play_games(
-                num_games=GAMES_PER_BATCH,
-                save_dir=REPLAY_DIR,
-                worker_id=WORKER_NAME,
+                num_games=args.games,
+                save_dir=replay_dir,
+                worker_id=args.worker,
                 model_version=local_version,
             )
         except Exception as e:
