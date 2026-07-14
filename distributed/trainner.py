@@ -224,7 +224,7 @@ def training_loop():
             print(f"Error during training iteration: {e}")
             import traceback
             traceback.print_exc()
-            time.sleep(60)
+            time.sleep(30)
 
 if __name__ == "__main__":
     training_loop()

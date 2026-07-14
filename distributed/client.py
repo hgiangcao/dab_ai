@@ -27,6 +27,7 @@ class ServerClient:
             self.server + "/latest_model",
             stream=True
         )
+        r.raise_for_status()
 
         with open(save_path, "wb") as f:
             for chunk in r.iter_content(8192):
