@@ -26,6 +26,8 @@ eval_args = dotdict({
     'l2_reg': 1e-4,
     'n_simulations': 100,
     'c_puct': 1.0,
+    'dirichlet_eps': 0.0,
+    'dirichlet_alpha': 0.3,
     'device': 'cpu'  # CPU allows us to run evaluation in parallel efficiently
 })
 
@@ -93,13 +95,8 @@ def _worker_play_single(worker_args):
             def agent_opp(g):
                 valid = g.get_valid_moves()
                 return random.choice(valid) if valid else None
-            
     # Assign turns
     players = {1: agent_cand, -1: agent_opp} if p1_starts else {1: agent_opp, -1: agent_cand}
-            
-    # Assign turns
-    players = {1: agent_cand, -1: agent_best} if p1_starts else {1: agent_best, -1: agent_cand}
-    
     # Play
     while game.is_running():
         cur_player = game.current_player

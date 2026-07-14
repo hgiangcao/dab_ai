@@ -147,7 +147,7 @@ def run_training_iteration(writer=None, iteration=0):
     if client_winrates:
         max_client_winrate = max(client_winrates)
         current_phase = model_manager.get_current_phase()
-        
+        print ("max_client_winrate ,current_phase",max_client_winrate ,current_phase)
         if writer:
             writer.add_scalar('Curriculum/Phase_Winrate', max_client_winrate, iteration)
             writer.add_scalar('Curriculum/Current_Phase', current_phase, iteration)

@@ -166,6 +166,9 @@ class SelfPlayGenerator:
         timestamp = __import__('datetime').datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = os.path.join(save_dir, f"{worker_id}_v{model_version}_{timestamp}.npz")
         
+
+        print ("Phase:", current_phase, "winrate", phase_winrate)
+
         np.savez_compressed(
             filename,
             lines=lines_data,
