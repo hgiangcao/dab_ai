@@ -33,12 +33,15 @@ def main():
         #
         # 1. Download latest model if needed
         #
-        server_version = client.get_version()
+        server_info = client.get_version()
         
-        if server_version == -1:
+        if server_info is None:
             print("Could not connect to server or parse version. Retrying in 10 seconds...")
             time.sleep(10)
             continue
+
+        server_version = int(server_info.get("last_updated_model", -1))
+        server_phase = int(server_info.get("current_phase", 0))
 
         if server_version != local_version or generator.latest_model_path is None:
             print(f"Downloading model version {server_version}")
@@ -60,6 +63,7 @@ def main():
                 save_dir=replay_dir,
                 worker_id=args.worker,
                 model_version=local_version,
+                current_phase=server_phase
             )
         except Exception as e:
             print(f"Error during self-play generation: {e}")

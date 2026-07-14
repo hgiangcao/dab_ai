@@ -38,7 +38,7 @@ def get_current_model_dir():
 
 BATCH_SIZE = 512
 
-EPOCHS = 100
+EPOCHS = 10
 
 LEARNING_RATE = 0.0005
 

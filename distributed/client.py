@@ -10,16 +10,13 @@ class ServerClient:
         self.worker = worker
 
     def get_version(self):
-
         try:
             r = requests.get(self.server + "/version", timeout=10)
             data = r.json()
-            print (data)
-            # Our server returns {"run": ..., "last_updated_model": X, "current_phase": Y}
-            return int(data.get("last_updated_model", -1))
+            return data
         except Exception as e:
             print(f"Connection error fetching version: {e}")
-            return -1
+            return None
 
     def download_latest_model(self, save_path):
 

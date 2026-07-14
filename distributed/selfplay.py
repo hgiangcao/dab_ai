@@ -67,19 +67,7 @@ class SelfPlayGenerator:
         """Loads the path to the latest model to be used by the multiprocessing workers."""
         self.latest_model_path = os.path.abspath(checkpoint)
 
-    def play_games(self, num_games, save_dir, worker_id="worker", model_version=0):
-        # 1. Get current phase from version.txt
-        version_txt_path = os.path.join(PROJECT_ROOT, "version.txt")
-        current_phase = 0
-        if os.path.exists(version_txt_path):
-            try:
-                with open(version_txt_path, "r") as f:
-                    for line in f:
-                        if line.startswith("current_phase:"):
-                            current_phase = int(line.split(":")[1].strip())
-            except Exception as e:
-                print(f"Error reading version.txt: {e}")
-        
+    def play_games(self, num_games, save_dir, worker_id="worker", model_version=0, current_phase=0):
         print(f"Starting generation of {num_games} games at Phase {current_phase}...")
 
         # 2. Determine opponent pool based on phase (matching coach.py configuration)
