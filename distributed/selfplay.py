@@ -186,7 +186,8 @@ class SelfPlayGenerator:
             worker_id=np.array(worker_id),
             model_version=np.array(model_version, dtype=np.int32),
             game_count=np.array(len(lines_data), dtype=np.int32),
-            phase_winrate=np.array([phase_winrate], dtype=np.float32)
+            phase_winrate=np.array([phase_winrate], dtype=np.float32),
+            current_phase=np.array([current_phase], dtype=np.int32)
         )
         
         print(f"Saved {len(iteration_data)} examples to {filename}")
