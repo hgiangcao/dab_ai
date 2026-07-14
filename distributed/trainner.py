@@ -23,6 +23,7 @@ train_args = dotdict({
     'batch_size': config.BATCH_SIZE,
     'num_channels': 256,
     'num_res_blocks': 10,
+    'l2_reg': 1e-4,
     'device': 'cuda' if torch.cuda.is_available() else 'cpu'
 })
 
@@ -128,6 +129,31 @@ def run_training_iteration(writer=None, iteration=0):
         print("No files in ready/ to claim. Waiting for workers...")
         return False
         
+    # 2.5 Check Curriculum Phase Winrates
+    client_winrates = []
+    for f in claimed_files:
+        try:
+            data = np.load(f, allow_pickle=False)
+            if 'phase_winrate' in data:
+                client_winrates.append(data['phase_winrate'][0])
+        except Exception:
+            pass
+            
+    if client_winrates:
+        max_client_winrate = max(client_winrates)
+        current_phase = model_manager.get_current_phase()
+        
+        if writer:
+            writer.add_scalar('Curriculum/Phase_Winrate', max_client_winrate, iteration)
+            writer.add_scalar('Curriculum/Current_Phase', current_phase, iteration)
+            
+        if max_client_winrate >= 0.60 and current_phase < 5:
+            print(f"\n===========================================================")
+            print(f"Phase {current_phase} cleared (Winrate: {max_client_winrate:.1%})!")
+            print(f"Advancing to Phase {current_phase + 1}...")
+            print(f"===========================================================\n")
+            model_manager.advance_curriculum_phase()
+        
     # 3. Load the replay buffer from training/
     replay_data = replay_manager.load_replay_buffer(claimed_files)
     if len(replay_data) < config.MIN_REPLAY_SIZE:
@@ -151,11 +177,13 @@ def run_training_iteration(writer=None, iteration=0):
         writer.add_scalar('Log/Memory_Size', len(replay_data), iteration)
     
     # 5. Evaluate and update
-    print("\nEvaluating candidate model against best model...")
-    promoted_model, win_rate = evaluator.evaluate_new_model()
+    print("\nEvaluating candidate model against best model and baselines...")
+    promoted_model, win_rate, baseline_win_rates = evaluator.evaluate_new_model()
     
     if writer:
         writer.add_scalar('Evaluation/Win_Rate_Vs_Old', win_rate, iteration)
+        for opp_name, rate in baseline_win_rates.items():
+            writer.add_scalar(f'Evaluation/Win_Rate_Vs_{opp_name}', rate, iteration)
         writer.flush()
     
     if promoted_model:

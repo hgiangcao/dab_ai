@@ -46,6 +46,30 @@ def increase_version():
                     f.write(line)
     return new_version
 
+def get_current_phase():
+    if os.path.exists(config.VERSION_FILE):
+        with open(config.VERSION_FILE, "r") as f:
+            for line in f:
+                if line.startswith("current_phase:"):
+                    return int(line.split(":")[1].strip())
+    return 0
+
+def advance_curriculum_phase():
+    current_phase = get_current_phase()
+    new_phase = current_phase + 1
+    
+    if os.path.exists(config.VERSION_FILE):
+        with open(config.VERSION_FILE, "r") as f:
+            lines = f.readlines()
+            
+        with open(config.VERSION_FILE, "w") as f:
+            for line in lines:
+                if line.startswith("current_phase:"):
+                    f.write(f"current_phase: {new_phase}\n")
+                else:
+                    f.write(line)
+    return new_phase
+
 def get_best_model_path():
     """
     Return:

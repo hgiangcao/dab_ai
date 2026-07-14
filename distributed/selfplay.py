@@ -129,6 +129,8 @@ class SelfPlayGenerator:
             
         # 4. Generate games using multiprocessing pool
         iteration_data = []
+        phase_wins = 0
+        phase_decisive = 0
         mp_context = multiprocessing.get_context('spawn')
         
         num_workers = max(1, multiprocessing.cpu_count() - 1)
@@ -136,10 +138,16 @@ class SelfPlayGenerator:
             futures = [executor.submit(worker_execute_episode, arg) for arg in worker_args_list]
             for future in tqdm(concurrent.futures.as_completed(futures), total=num_games, desc=f"Self-Play (Phase {current_phase})"):
                 try:
-                    examples, _, _, _, _ = future.result()
+                    examples, length, depth, latest_won, latest_drawn = future.result()
                     iteration_data.extend(examples)
+                    if not latest_drawn:
+                        phase_decisive += 1
+                        if latest_won:
+                            phase_wins += 1
                 except Exception as e:
                     print(f"Worker execution failed: {e}")
+
+        phase_winrate = phase_wins / phase_decisive if phase_decisive > 0 else 0.5
 
         # 5. Save generated examples to local storage (.npz)
         if not iteration_data:
@@ -178,7 +186,7 @@ class SelfPlayGenerator:
             worker_id=np.array(worker_id),
             model_version=np.array(model_version, dtype=np.int32),
             game_count=np.array(len(lines_data), dtype=np.int32),
-            timestamp=np.array(timestamp),
+            phase_winrate=np.array([phase_winrate], dtype=np.float32)
         )
         
         print(f"Saved {len(iteration_data)} examples to {filename}")
