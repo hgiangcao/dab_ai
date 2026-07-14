@@ -106,7 +106,7 @@ class SelfPlayGenerator:
             sampled_sequences = [random.choice(self.json_logs) for _ in range(num_games)]
         else:
             sampled_sequences = [None] * num_games
-            
+        print(start_fill_pct,"RANDOM FILLED MOVES")
         # 3. Setup arguments for multiprocessing
         worker_args_list = []
         for seq in sampled_sequences:
