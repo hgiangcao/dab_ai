@@ -1,2 +1,9 @@
 logs/
 __pycache__/
+*.npz
+*.tar
+*.pth
+upload_replay/
+worker_data/
+storage/
+*.pt

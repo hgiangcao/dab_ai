@@ -55,5 +55,10 @@ echo "Checking for running TensorBoard processes..."
 pkill -9 -f "tensorboard" 2>/dev/null || true
 echo "  [✓] TensorBoard processes cleaned"
 
+# 8. Clean up running uvicorn processes
+echo "Checking for running uvicorn processes..."
+pkill -9 -f "uvicorn" 2>/dev/null || true
+echo "  [✓] Uvicorn processes cleaned"
+
 echo ""
 echo "Done. Project is clean."

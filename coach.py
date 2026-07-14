@@ -403,6 +403,21 @@ class AlphaZeroTrainer:
                 print("ACCEPTING NEW MODEL")
                 self.pnet.nnet.load_state_dict(self.nnet.nnet.state_dict())
                 self.nnet.save_checkpoint(folder=self.args.checkpoint_dir, filename='best.pth.tar')
+                
+                # Update version.txt with the new accepted checkpoint id
+                version_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt")
+                if os.path.exists(version_file):
+                    try:
+                        with open(version_file, "r") as f:
+                            v_lines = f.readlines()
+                        with open(version_file, "w") as f:
+                            for line in v_lines:
+                                if line.startswith("last_updated_model:"):
+                                    f.write(f"last_updated_model: {i}\n")
+                                else:
+                                    f.write(line)
+                    except Exception as e:
+                        print(f"Error updating version.txt: {e}")
             else:
                 print("REJECTING NEW MODEL")
                 self.nnet.nnet.load_state_dict(self.pnet.nnet.state_dict())
