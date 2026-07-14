@@ -44,6 +44,7 @@ def startup_event():
         
         nnet_args = dotdict({
             'lr': 0.0005,
+            'l2_reg': 1e-4,
             'epochs': 100,
             'batch_size': 512,
             'num_channels': 256,
