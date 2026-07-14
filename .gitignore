@@ -8,3 +8,4 @@ worker_data/
 storage/
 *.pt
 *.jsonl
+version.txt
