@@ -39,7 +39,7 @@ def _worker_play_single(worker_args):
     
     # 1. Candidate Model
     cand_net = NNetWrapper(game, eval_args)
-    cand_state = torch.load(candidate_path, map_location='cpu', weights_only=True)
+    cand_state = torch.load(candidate_path, map_location='cpu', weights_only=False)
     cand_net.nnet.load_state_dict(cand_state['state_dict'] if 'state_dict' in cand_state else cand_state)
     cand_net.nnet.eval()
     mcts_cand = MCTS(cand_net, eval_args)
@@ -51,7 +51,7 @@ def _worker_play_single(worker_args):
     # 2. Best Model (or fallback to random if none exists)
     if os.path.exists(best_path):
         best_net = NNetWrapper(game, eval_args)
-        best_state = torch.load(best_path, map_location='cpu', weights_only=True)
+        best_state = torch.load(best_path, map_location='cpu', weights_only=False)
         best_net.nnet.load_state_dict(best_state['state_dict'] if 'state_dict' in best_state else best_state)
         best_net.nnet.eval()
         mcts_best = MCTS(best_net, eval_args)
@@ -174,10 +174,10 @@ def evaluate_new_model():
     if should_promote(result):
         print(f"Result exceeds threshold ({config.PROMOTION_THRESHOLD:.2%}). Model promoted to BEST.")
         model_manager.promote_best_model()
-        return True
+        return True, result['win_rate']
     else:
         print("Model rejected.")
-        return False
+        return False, result['win_rate']
 
 if __name__ == "__main__":
     evaluate_new_model()

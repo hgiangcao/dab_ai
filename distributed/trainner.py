@@ -14,6 +14,7 @@ import replay_manager
 import evaluator
 from game import DotsAndBoxesGame
 from model import NNetWrapper, dotdict
+from torch.utils.tensorboard import SummaryWriter
 
 # Re-use args from config (augmented with model architecture defaults)
 train_args = dotdict({
@@ -103,7 +104,7 @@ def save_training_checkpoint():
     """Save training states. (Currently handled by model_manager.save_latest_model)"""
     pass
 
-def run_training_iteration():
+def run_training_iteration(writer=None, iteration=0):
     """
     Execute one complete iteration:
     1. Validate and promote incoming → ready
@@ -141,11 +142,21 @@ def run_training_iteration():
     # 4. Train candidate network
     merged_path = replay_manager.merge_replay(claimed_files)
     candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
-    train_network(replay_data, candidate_path)
+    losses = train_network(replay_data, candidate_path)
+    
+    if writer:
+        writer.add_scalar('Log/Policy_Loss', losses["pi_loss"], iteration)
+        writer.add_scalar('Log/Value_Loss', losses["v_loss"], iteration)
+        writer.add_scalar('Log/Total_Loss', losses["total_loss"], iteration)
+        writer.add_scalar('Log/Memory_Size', len(replay_data), iteration)
     
     # 5. Evaluate and update
     print("\nEvaluating candidate model against best model...")
-    promoted_model = evaluator.evaluate_new_model()
+    promoted_model, win_rate = evaluator.evaluate_new_model()
+    
+    if writer:
+        writer.add_scalar('Evaluation/Win_Rate_Vs_Old', win_rate, iteration)
+        writer.flush()
     
     if promoted_model:
         print("Model promoted! Cleaning up old data...")
@@ -165,20 +176,48 @@ def training_loop():
     """
     print("Distributed Trainer Daemon Started. Monitoring storage/replay...")
     
+    # Initialize TensorBoard writer
+    log_dir = config.get_current_model_dir()
+    os.makedirs(log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=log_dir)
+    iteration = 1
+    
+    # Backup source code for reproducibility
+    import glob
+    import shutil
+    code_dir = os.path.join(log_dir, 'code')
+    os.makedirs(code_dir, exist_ok=True)
+    
+    for f in glob.glob(os.path.join(PROJECT_ROOT, '*.py')):
+        shutil.copy(f, code_dir)
+        
+    dist_dir = os.path.join(code_dir, 'distributed')
+    os.makedirs(dist_dir, exist_ok=True)
+    for f in glob.glob(os.path.join(PROJECT_ROOT, 'distributed', '*.py')):
+        shutil.copy(f, dist_dir)
+        
+    bots_src = os.path.join(PROJECT_ROOT, 'bots')
+    if os.path.exists(bots_src):
+        shutil.copytree(bots_src, os.path.join(code_dir, 'bots'), dirs_exist_ok=True)
+    
     while True:
         try:
-            # Check if there are sufficient individual files or a merged buffer
-            replay_files = replay_manager.get_replay_files()
-            merged_exists = os.path.exists(os.path.join(config.REPLAY_DIR, "merged.npz"))
+            # Check how many replay files are in incoming/ and ready/
+            import glob
+            incoming = glob.glob(os.path.join(config.REPLAY_INCOMING, "*.npz"))
+            ready = glob.glob(os.path.join(config.REPLAY_READY, "*.npz"))
+            total_files = len(incoming) + len(ready)
             
-            # Start iteration if we have multiple new files to merge or an existing buffer to train on
-            if len(replay_files) >= 5 or merged_exists: 
-                success = run_training_iteration()
+            # Start iteration if we have multiple new files to merge
+            if total_files >= 5: 
+                success = run_training_iteration(writer, iteration)
                 if not success:
                     print("Iteration skipped. Sleeping 60s...")
                     time.sleep(60)
+                else:
+                    iteration += 1
             else:
-                print(f"Not enough replay files found ({len(replay_files)}). Sleeping 60s...")
+                print(f"Not enough replay files found (incoming+ready = {total_files}). Sleeping 60s...")
                 time.sleep(60)
                 
         except Exception as e:

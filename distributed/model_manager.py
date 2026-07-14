@@ -124,7 +124,7 @@ def load_model(filepath):
     if not os.path.exists(filepath):
         return None
         
-    state_dict = torch.load(filepath, map_location='cpu', weights_only=True)
+    state_dict = torch.load(filepath, map_location='cpu', weights_only=False)
     if 'state_dict' in state_dict:
         return state_dict['state_dict']
     return state_dict

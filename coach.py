@@ -24,7 +24,7 @@ def worker_execute_episode(worker_args):
     nnet = NNetWrapper(dummy_game, args)
     
     # Load latest model from path safely
-    state_dict = torch.load(latest_model_path, map_location='cpu', weights_only=True)
+    state_dict = torch.load(latest_model_path, map_location='cpu', weights_only=False)
     nnet.nnet.load_state_dict(state_dict['state_dict'] if 'state_dict' in state_dict else state_dict)
     nnet.nnet.eval()
     mcts_latest = mcts_class(nnet, args)
@@ -34,7 +34,7 @@ def worker_execute_episode(worker_args):
         agent_opp = None
     elif opp_type in ["best", "past"]:
         opp_net = NNetWrapper(dummy_game, args)
-        opp_state_dict = torch.load(opp_path, map_location='cpu', weights_only=True)
+        opp_state_dict = torch.load(opp_path, map_location='cpu', weights_only=False)
         opp_net.nnet.load_state_dict(opp_state_dict['state_dict'] if 'state_dict' in opp_state_dict else opp_state_dict)
         opp_net.nnet.eval()
         mcts_opp = mcts_class(opp_net, args)
@@ -146,7 +146,7 @@ def worker_play_single(worker_args):
     
     # Init new network (Agent 1)
     nnet = NNetWrapper(dummy_game, args)
-    state_dict = torch.load(latest_model_path, map_location='cpu', weights_only=True)
+    state_dict = torch.load(latest_model_path, map_location='cpu', weights_only=False)
     nnet.nnet.load_state_dict(state_dict['state_dict'] if 'state_dict' in state_dict else state_dict)
     nnet.nnet.eval()
     mcts1 = mcts_class(nnet, args)
@@ -183,7 +183,7 @@ def worker_play_single(worker_args):
     else: # "pnet"
         pnet = NNetWrapper(dummy_game, args)
         pbuffer = io.BytesIO(pnet_bytes)
-        pstate_dict = torch.load(pbuffer, weights_only=True)
+        pstate_dict = torch.load(pbuffer, weights_only=False)
         pnet.nnet.load_state_dict(pstate_dict)
         pnet.nnet.eval()
         mcts2 = mcts_class(pnet, args)
