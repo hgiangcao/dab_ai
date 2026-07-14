@@ -132,9 +132,7 @@ def home():
 
 @app.get("/version")
 def version():
-    return {
-        "last_updated_model": current_version()
-    }
+    return get_version_info()
 
 # --------------------------------------------------------
 

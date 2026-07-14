@@ -50,7 +50,7 @@ LEARNING_RATE = 0.0005
 # maxlen_queue from main.py
 MAX_REPLAY_SIZE = 200000
 
-MIN_REPLAY_SIZE = 10000
+MIN_REPLAY_SIZE = 5000
 
 
 # ===================
