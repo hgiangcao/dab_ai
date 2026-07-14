@@ -103,7 +103,11 @@ class NNetWrapper:
     """
     def __init__(self, game, args):
         self.args = args
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        device_name = getattr(args, 'device', None)
+        if device_name is not None:
+            self.device = torch.device(device_name)
+        else:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Dimensions based on game (assuming n x n boxes)
         self.board_x, self.board_y = game.getBoardSize() if hasattr(game, 'getBoardSize') else (game.SIZE, game.SIZE)
@@ -182,19 +186,118 @@ class NNetWrapper:
             
         return sum(pi_losses)/len(pi_losses), sum(v_losses)/len(v_losses), sum(total_losses)/len(total_losses)
 
+    def format_game_state(self, game):
+        """Convert a DotsAndBoxes game into the 4-channel tensor expected by the network."""
+        from game import DotsAndBoxesGame
+
+        lines = game.get_canonical_lines()
+        boxes = game.get_canonical_boxes()
+        size = game.SIZE
+
+        h, v_mat = DotsAndBoxesGame.l_to_h_v(lines)
+
+        c1 = np.zeros((size + 1, size + 1), dtype=np.float32)
+        c1[:size + 1, :size] = h
+
+        c2 = np.zeros((size + 1, size + 1), dtype=np.float32)
+        c2[:size, :size + 1] = v_mat
+
+        c3 = np.zeros((size + 1, size + 1), dtype=np.float32)
+        c3[:size, :size] = (boxes == 1).astype(np.float32)
+
+        c4 = np.zeros((size + 1, size + 1), dtype=np.float32)
+        c4[:size, :size] = (boxes == -1).astype(np.float32)
+
+        return np.stack([c1, c2, c3, c4], axis=0)
+
+    def policy_value(self, board):
+        """Return policy logits and value estimate for a single board state."""
+        board = torch.FloatTensor(np.asarray(board, dtype=np.float64)).unsqueeze(0).to(self.device)
+        self.nnet.eval()
+
+        with torch.no_grad():
+            logits, value = self.nnet(board)
+
+        return logits.cpu().numpy()[0], value.cpu().numpy()[0]
+
     def predict(self, board):
         """
         Outputs policy and value for a single board state.
         board: formatted state representation (channels, x, y)
         """
-        board = torch.FloatTensor(board.astype(np.float64)).unsqueeze(0).to(self.device)
-        self.nnet.eval()
-        
-        with torch.no_grad():
-            pi, v = self.nnet(board)
+        logits, value = self.policy_value(board)
+        probs = np.exp(logits)
+        return probs, value
 
-        # Return probability distribution over actions and scalar value
-        return torch.exp(pi).data.cpu().numpy()[0], v.data.cpu().numpy()[0]
+    def select_action(self, board, valid_moves, temperature=1.0):
+        """Sample a valid action from the policy distribution."""
+        probs, _ = self.predict(board)
+        if valid_moves is None:
+            valid_moves = list(range(len(probs)))
+
+        valid_probs = np.zeros_like(probs, dtype=np.float64)
+        valid_probs[valid_moves] = probs[valid_moves]
+        total = valid_probs.sum()
+        if total <= 0:
+            action = int(valid_moves[0])
+        else:
+            valid_probs = valid_probs / total
+            action = int(np.random.choice(valid_moves, p=valid_probs[valid_moves]))
+        return action
+
+    def train_actor_critic(self, episodes, gamma=0.9, entropy_weight=0.01):
+        """Simple actor-critic training from direct returns without MCTS."""
+        self.nnet.train()
+
+        total_actor_loss = 0.0
+        total_critic_loss = 0.0
+        total_loss = 0.0
+        steps_seen = 0
+
+        for epoch in range(self.args.epochs):
+            for episode in episodes:
+                if not episode:
+                    continue
+
+                states = [item[0] for item in episode]
+                actions = [int(item[1]) for item in episode]
+                rewards = [float(item[2]) if len(item) > 2 else 0.0 for item in episode]
+
+                returns = []
+                running_return = 0.0
+                for reward in reversed(rewards):
+                    running_return = reward + gamma * running_return
+                    returns.append(running_return)
+                returns.reverse()
+
+                for state, action, target_return in zip(states, actions, returns):
+                    board = torch.FloatTensor(np.asarray(state, dtype=np.float64)).unsqueeze(0).to(self.device)
+                    action_tensor = torch.tensor([action], dtype=torch.long, device=self.device)
+                    target = torch.tensor([target_return], dtype=torch.float32, device=self.device)
+
+                    self.optimizer.zero_grad()
+                    logits, value = self.nnet(board)
+
+                    value_pred = value.squeeze(-1)
+                    log_prob = logits[:, action_tensor].squeeze()
+                    advantage = target - value_pred
+                    actor_loss = -(log_prob * advantage.detach()).mean()
+                    critic_loss = F.mse_loss(value_pred, target)
+                    entropy = -(torch.exp(logits) * logits).sum(dim=1).mean()
+                    loss = actor_loss + critic_loss + entropy_weight * entropy
+
+                    loss.backward()
+                    self.optimizer.step()
+
+                    total_actor_loss += actor_loss.item()
+                    total_critic_loss += critic_loss.item()
+                    total_loss += loss.item()
+                    steps_seen += 1
+
+        if steps_seen == 0:
+            return 0.0, 0.0, 0.0
+
+        return total_actor_loss / steps_seen, total_critic_loss / steps_seen, total_loss / steps_seen
 
     def loss_pi(self, targets, outputs):
         """Cross-entropy loss for the policy head"""
