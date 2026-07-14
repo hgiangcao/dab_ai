@@ -62,3 +62,5 @@ echo "  [✓] Uvicorn processes cleaned"
 
 echo ""
 echo "Done. Project is clean."
+
+clear
