@@ -323,6 +323,24 @@ def run_pretraining(nnet: NNetWrapper, run_dir: str, writer=None, game_size: int
         True if pretraining was performed, False if skipped.
     """
 
+    global_pretrained_path = os.path.join(PROJECT_ROOT, "logs", "pretrained_base.pth.tar")
+    run_pretrained_path = os.path.join(run_dir, "pretrained.pth.tar")
+
+    # If already exists in run_dir, skip
+    if os.path.exists(run_pretrained_path):
+        print(f"[Pretrain] Found existing pretrained weights at {run_pretrained_path}. Skipping pretraining.")
+        return False
+        
+    # If exists globally from a previous run, use it and skip
+    if os.path.exists(global_pretrained_path):
+        print(f"[Pretrain] Found global pretrained weights at {global_pretrained_path}. Copying to new run and skipping pretraining.")
+        import shutil
+        shutil.copy(global_pretrained_path, run_pretrained_path)
+        shutil.copy(global_pretrained_path, os.path.join(run_dir, "checkpoint_0.pth.tar"))
+        shutil.copy(global_pretrained_path, os.path.join(run_dir, "best.pth.tar"))
+        shutil.copy(global_pretrained_path, os.path.join(run_dir, "checkpoint_candidate.pth.tar"))
+        return False
+
     # ── Collect data from all available log files ──────────────────────────
     all_examples = []
 
@@ -357,8 +375,12 @@ def run_pretraining(nnet: NNetWrapper, run_dir: str, writer=None, game_size: int
     pretrained_path = os.path.join(run_dir, "pretrained.pth.tar")
 
     # 1. pretrained.pth.tar — existence marker so we don't redo pretraining on restart
-    torch.save(state, pretrained_path)
-    print(f"[Pretrain] Saved pretrained weights → {pretrained_path}")
+    torch.save(state, run_pretrained_path)
+    print(f"[Pretrain] Saved pretrained weights → {run_pretrained_path}")
+
+    # Also save globally so future runs can skip pretraining
+    torch.save(state, global_pretrained_path)
+    print(f"[Pretrain] Saved global pretrained base weights → {global_pretrained_path}")
 
     # 2. Overwrite checkpoint_0.pth.tar so server serves these weights
     ckpt0_path = os.path.join(run_dir, "checkpoint_0.pth.tar")

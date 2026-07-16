@@ -245,12 +245,26 @@ def training_loop():
     print("Initializing Neural Network for continuous training...")
     dummy_game = DotsAndBoxesGame(size=5)
     global_nnet = NNetWrapper(dummy_game, train_args)
+
+    # ── Supervised pretraining from bot game logs (runs once, skipped on restart) ──
+    print("\n" + "=" * 60)
+    print("PHASE 0: SUPERVISED PRETRAINING FROM BOT GAME LOGS")
+    print("=" * 60)
+    did_pretrain = run_pretraining(global_nnet, log_dir, writer)
+    if did_pretrain:
+        print("[Pretrain] Pretraining complete. Proceeding to AlphaZero self-play.\n")
+    else:
+        print("[Pretrain] Pretraining skipped. Using existing weights.\n")
+        
+    # Signal to workers that pretraining is done
+    model_manager.set_pretrain_finished()
+
     
     # Try to load full checkpoint (weights + optimizer + scheduler state)
     candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
     if os.path.exists(candidate_path):
         load_path = candidate_path
-        print("Load pretrained model")
+        print("Load pretrained model checkpoint_candidate")
     else:
         load_path = model_manager.get_latest_model_path()
         
@@ -277,18 +291,7 @@ def training_loop():
     else:
         print("No previous model found. Initializing randomly.")
         
-    # ── Supervised pretraining from bot game logs (runs once, skipped on restart) ──
-    print("\n" + "=" * 60)
-    print("PHASE 0: SUPERVISED PRETRAINING FROM BOT GAME LOGS")
-    print("=" * 60)
-    did_pretrain = run_pretraining(global_nnet, log_dir, writer)
-    if did_pretrain:
-        print("[Pretrain] Pretraining complete. Proceeding to AlphaZero self-play.\n")
-    else:
-        print("[Pretrain] Pretraining skipped. Using existing weights.\n")
-        
-    # Signal to workers that pretraining is done
-    model_manager.set_pretrain_finished()
+    
 
     # Initialize rolling experience replay buffer capped at MAX_REPLAY_SIZE
     print(f"Initializing experience replay buffer (max size: {config.MAX_REPLAY_SIZE:,})...")
