@@ -44,7 +44,7 @@ from model import NNetWrapper, dotdict
 PRETRAIN_ARGS = dotdict({
     'lr':                 1e-3,        # AdamW LR (higher than AZ training LR)
     'epochs':             3,          # 10-20 epochs recommended
-    'batch_size':         512,         # 256-512 recommended
+    'batch_size':         1024,         # 256-512 recommended
     'num_channels':       256,
     'num_res_blocks':     10,
     'l2_reg':             1e-4,        # Weight decay
