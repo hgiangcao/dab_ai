@@ -433,9 +433,9 @@ class AlphaZeroTrainer:
             phases_config = [
                 [("random", 0.01)],
                 [("greedy", 0.1)],
-                [("greedy_chain", 0.1)],
                 [("alpha_beta_0.1s", 0.1)],
                 [("mcts_0.1s", 0.1)],
+                [("greedy_chain", 0.1)],
                 [("self", 0.4), ("best", 0.1), ("past", 0.1)]
             ]
             
