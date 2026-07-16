@@ -69,6 +69,7 @@ def startup_event():
             'batch_size': shared_config.BATCH_SIZE,
             'num_channels': 256,
             'num_res_blocks': 10,
+            'lr_scheduler_steps': 336,
             'device': 'cpu'
         })
         

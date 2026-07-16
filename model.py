@@ -44,8 +44,8 @@ class DotsAndBoxesNet(nn.Module):
         # Value Head
         self.conv_value = nn.Conv2d(in_channels=args.num_channels, out_channels=1, kernel_size=1)
         self.bn_value = nn.BatchNorm2d(1)
-        self.fc_value1 = nn.Linear((game_size + 1) * (game_size + 1), 64)
-        self.fc_value2 = nn.Linear(64, 1)
+        self.fc_value1 = nn.Linear((game_size + 1) * (game_size + 1), 256)
+        self.fc_value2 = nn.Linear(256, 1)
 
     def forward(self, s):
         # s: batch_size x channels x board_x x board_y
@@ -111,6 +111,11 @@ class NNetWrapper:
 
         self.nnet = DotsAndBoxesNet(self.board_x, self.action_size, args).to(self.device)
         self.optimizer = optim.Adam(self.nnet.parameters(), lr=args.lr, weight_decay=args.l2_reg)
+        # CosineAnnealingLR: decays LR from args.lr down to 1e-5 over T_max scheduler steps
+        T_max = getattr(args, 'lr_scheduler_steps', 300)
+        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer, T_max=T_max, eta_min=1e-5
+        )
 
     def train(self, examples):
         """
@@ -135,6 +140,10 @@ class NNetWrapper:
             total_v_loss += v_l
             total_loss_all += t_l
             
+        # Step the LR scheduler once per training call (one training iteration)
+        self.scheduler.step()
+        current_lr = self.optimizer.param_groups[0]['lr']
+        print(f"LR after scheduler step: {current_lr:.2e}")
         return total_pi_loss / epochs, total_v_loss / epochs, total_loss_all / epochs
 
     def _train_epoch(self, examples, batch_size):
@@ -211,7 +220,8 @@ class NNetWrapper:
         
         torch.save({
             'state_dict': self.nnet.state_dict(),
-            'optimizer': self.optimizer.state_dict()
+            'optimizer': self.optimizer.state_dict(),
+            'scheduler': self.scheduler.state_dict(),
         }, filepath)
 
     def load_checkpoint(self, folder='checkpoint', filename='checkpoint.pth.tar'):
@@ -221,4 +231,7 @@ class NNetWrapper:
             
         checkpoint = torch.load(filepath, map_location=self.device)
         self.nnet.load_state_dict(checkpoint['state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer'])
+        if 'optimizer' in checkpoint:
+            self.optimizer.load_state_dict(checkpoint['optimizer'])
+        if 'scheduler' in checkpoint:
+            self.scheduler.load_state_dict(checkpoint['scheduler'])

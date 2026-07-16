@@ -90,26 +90,24 @@ def get_latest_model_path(version=None):
 
 def save_latest_model(model):
     """
-    Save candidate model.
-    latest.pth (actually checkpoint_{version}.pth.tar)
+    Save candidate model with optimizer and scheduler states for full training continuity.
     """
-    version = get_current_version()
-    # When we are saving a new candidate, we might want to save it as version + 1 first
-    # But usually, we just save to temp_latest.pth.tar or we save it to checkpoint_{v} AFTER increasing version
-    # Let's save it to temp_latest.pth.tar as the candidate, or to a new checkpoint.
-    # In coach.py, we save as checkpoint_{i}.pth.tar.
-    # We will save to a temporary latest model path that trainer.py can use.
-    filepath = os.path.join(config.get_current_model_dir(), f"checkpoint_candidate.pth.tar")
+    filepath = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     
-    # Support both raw torch models and our NNetWrapper
-    if hasattr(model, 'state_dict'):
-        state = {'state_dict': model.state_dict()}
-    elif hasattr(model, 'nnet'):
-        state = {'state_dict': model.nnet.state_dict()}
+    state = {}
+    if hasattr(model, 'nnet'):
+        # Full NNetWrapper — save model, optimizer and scheduler
+        state['state_dict'] = model.nnet.state_dict()
+        if hasattr(model, 'optimizer'):
+            state['optimizer'] = model.optimizer.state_dict()
+        if hasattr(model, 'scheduler'):
+            state['scheduler'] = model.scheduler.state_dict()
+    elif hasattr(model, 'state_dict'):
+        state['state_dict'] = model.state_dict()
     else:
-        state = model # fallback assuming it's already a dict
-        
+        state = model  # fallback: already a dict
+
     torch.save(state, filepath)
     return filepath
 

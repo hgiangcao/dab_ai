@@ -26,6 +26,8 @@ train_args = dotdict({
     'num_channels': 256,
     'num_res_blocks': 10,
     'l2_reg': 1e-4,
+    # 7 iter/hour × 48 hours = 336 total iterations → LR reaches eta_min exactly at stop time
+    'lr_scheduler_steps': 336,
     'device': 'cuda' if torch.cuda.is_available() else 'cpu'
 })
 
@@ -70,7 +72,7 @@ def train_network(replay_data, output_model_path, nnet):
     Input:
         replay_data: merged self-play games (loaded as tuples)
         output_model_path: path to save trained model
-        nnet: the single instance of the Neural Network
+        nnet: the single persistent instance of the Neural Network
     """
         
     print(f"Augmenting dataset of {len(replay_data)} raw states...")
@@ -96,7 +98,7 @@ def save_training_checkpoint():
     """Save training states. (Currently handled by model_manager.save_latest_model)"""
     pass
 
-def run_training_iteration(writer=None, iteration=0, nnet=None):
+def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=None):
     """
     Execute one complete iteration:
     1. Validate and promote incoming → ready
@@ -143,24 +145,35 @@ def run_training_iteration(writer=None, iteration=0, nnet=None):
             writer.add_scalar('Curriculum/Phase_Winrate', max_client_winrate, iteration)
             writer.add_scalar('Curriculum/Current_Phase', current_phase, iteration)
             
-        # if max_client_winrate >= 0.60 and current_phase < 5:
-        if iteration % 5 == 0:
+        # Advance phase only when the model is genuinely winning, 
+        # with a backstop of 20 iterations so training never stalls forever.
+        phase_iterations = iteration % 20  # rough estimate of iters spent in current phase
+        if (max_client_winrate >= 0.60 or phase_iterations == 0) and current_phase < 5:
+            reason = f"Winrate {max_client_winrate:.1%} >= 60%" if max_client_winrate >= 0.60 else "Max phase iterations reached"
             print(f"\n===========================================================")
-            print(f"Phase {current_phase} cleared (Winrate: {max_client_winrate:.1%})!")
+            print(f"Phase {current_phase} cleared ({reason})!")
             print(f"Advancing to Phase {current_phase + 1}...")
             print(f"===========================================================\n")
             model_manager.advance_curriculum_phase()
         
     # 3. Load the replay buffer from training/
-    replay_data = replay_manager.load_replay_buffer(claimed_files)
-    if len(replay_data) < config.MIN_REPLAY_SIZE:
-        print(f"Replay buffer size ({len(replay_data)}) below minimum ({config.MIN_REPLAY_SIZE}). Waiting...")
+    new_data = replay_manager.load_replay_buffer(claimed_files)
+    if len(new_data) < config.MIN_REPLAY_SIZE:
+        print(f"New data size ({len(new_data)}) below minimum ({config.MIN_REPLAY_SIZE}). Waiting...")
         # Move claimed files back to ready/ so they aren't lost
         for f in claimed_files:
             fname = os.path.basename(f)
             import shutil
             shutil.move(f, os.path.join(config.REPLAY_READY, fname))
         return False
+    
+    # Accumulate into rolling replay buffer (experience replay window)
+    if replay_buffer is not None:
+        replay_buffer.extend(new_data)
+        replay_data = list(replay_buffer)
+        print(f"Replay buffer: {len(new_data)} new + {len(replay_data) - len(new_data)} retained = {len(replay_data)} total samples")
+    else:
+        replay_data = new_data
         
     # 4. Train candidate network
     merged_path = replay_manager.merge_replay(claimed_files)
@@ -168,10 +181,12 @@ def run_training_iteration(writer=None, iteration=0, nnet=None):
     losses = train_network(replay_data, candidate_path, nnet)
     
     if writer:
+        current_lr = nnet.optimizer.param_groups[0]['lr']
         writer.add_scalar('Log/Policy_Loss', losses["pi_loss"], iteration)
         writer.add_scalar('Log/Value_Loss', losses["v_loss"], iteration)
         writer.add_scalar('Log/Total_Loss', losses["total_loss"], iteration)
         writer.add_scalar('Log/Memory_Size', len(replay_data), iteration)
+        writer.add_scalar('Log/Learning_Rate', current_lr, iteration)
     
     # 5. Evaluate and update
     print("\nEvaluating candidate model against best model and baselines...")
@@ -230,20 +245,40 @@ def training_loop():
     dummy_game = DotsAndBoxesGame(size=5)
     global_nnet = NNetWrapper(dummy_game, train_args)
     
-    # Try to load existing state right away
+    # Try to load full checkpoint (weights + optimizer + scheduler state)
     candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
     if os.path.exists(candidate_path):
         load_path = candidate_path
     else:
         load_path = model_manager.get_latest_model_path()
         
-    state_dict = model_manager.load_model(load_path)
-    if state_dict:
-        global_nnet.nnet.load_state_dict(state_dict)
-        print(f"Loaded existing model weights from {load_path}.")
+    if os.path.exists(load_path):
+        checkpoint = torch.load(load_path, map_location='cpu', weights_only=False)
+        weights = checkpoint.get('state_dict', checkpoint)
+        global_nnet.nnet.load_state_dict(weights)
+        if 'optimizer' in checkpoint:
+            global_nnet.optimizer.load_state_dict(checkpoint['optimizer'])
+            print(f"Restored optimizer state from {load_path}.")
+        if 'scheduler' in checkpoint:
+            global_nnet.scheduler.load_state_dict(checkpoint['scheduler'])
+            print(f"Restored scheduler state from {load_path}.")
+        else:
+            # No saved scheduler state (pre-scheduler checkpoint).
+            # Fast-forward the scheduler to match iterations already completed
+            # so LR resumes from the correct position instead of restarting at peak.
+            elapsed = model_manager.get_current_version()
+            for _ in range(elapsed):
+                global_nnet.scheduler.step()
+            resumed_lr = global_nnet.optimizer.param_groups[0]['lr']
+            print(f"No scheduler state found. Fast-forwarded {elapsed} steps. Resumed LR: {resumed_lr:.2e}")
+        print(f"Loaded model weights from {load_path}.")
     else:
         print("No previous model found. Initializing randomly.")
         
+    # Initialize rolling experience replay buffer capped at MAX_REPLAY_SIZE
+    print(f"Initializing experience replay buffer (max size: {config.MAX_REPLAY_SIZE:,})...")
+    replay_buffer = deque(maxlen=config.MAX_REPLAY_SIZE)
+    
     while True:
         try:
             # Check how many replay files are in incoming/ and ready/
@@ -254,7 +289,7 @@ def training_loop():
             
             # Start iteration if we have multiple new files to merge
             if total_files >= 5: 
-                success = run_training_iteration(writer, iteration, global_nnet)
+                success = run_training_iteration(writer, iteration, global_nnet, replay_buffer)
                 if not success:
                     print("Iteration skipped. Sleeping 60s...")
                     time.sleep(60)
