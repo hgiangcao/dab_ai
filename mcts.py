@@ -27,6 +27,7 @@ class MCTS:
         self.dirichlet_eps = mcts_parameters.get("dirichlet_eps", 0.0)
         self.dirichlet_alpha = mcts_parameters.get("dirichlet_alpha", 0.0)
         self.time_limit = mcts_parameters.get("time_limit", None)
+        self.max_depth_reached = 0
 
     def play(self, game_state, temp: int, add_root_noise: bool = False) -> list:
         root = AZNode(parent=None, s=copy.deepcopy(game_state), a=None)
