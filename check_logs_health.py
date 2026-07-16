@@ -3,7 +3,7 @@ import json
 import numpy as np
 from game import DotsAndBoxesGame
 
-def check_logs_health(filepath: str = "game_logs.jsonl"):
+def check_logs_health(filepath: str = "game_logs_bot.jsonl"):
     if not os.path.exists(filepath):
         print(f"Error: Log file '{filepath}' not found. Please run log generation first!")
         return
