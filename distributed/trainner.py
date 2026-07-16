@@ -286,6 +286,9 @@ def training_loop():
         print("[Pretrain] Pretraining complete. Proceeding to AlphaZero self-play.\n")
     else:
         print("[Pretrain] Pretraining skipped. Using existing weights.\n")
+        
+    # Signal to workers that pretraining is done
+    model_manager.set_pretrain_finished()
 
     # Initialize rolling experience replay buffer capped at MAX_REPLAY_SIZE
     print(f"Initializing experience replay buffer (max size: {config.MAX_REPLAY_SIZE:,})...")

@@ -42,7 +42,7 @@ def startup_event():
     next_run = f"run_{max_run + 1}"
     
     # 2. Force a fresh version.txt for the new run
-    VERSION_FILE.write_text(f"run: {next_run}\nlast_updated_model: 0\ncurrent_phase: 0\n")
+    VERSION_FILE.write_text(f"run: {next_run}\nlast_updated_model: 0\ncurrent_phase: 0\nfinish_pretrain: False\n")
     print(f"\n===========================================================")
     print(f"SERVER STARTING NEW EXPERIMENT: {next_run}")
     print(f"===========================================================\n")
@@ -89,16 +89,19 @@ def startup_event():
                     new_lines.append("last_updated_model: 0")
                 else:
                     new_lines.append(line)
+            # If finish_pretrain is not present, add it
+            if not any(line.startswith("finish_pretrain:") for line in lines):
+                new_lines.append("finish_pretrain: False")
             VERSION_FILE.write_text("\n".join(new_lines) + "\n")
         else:
-            VERSION_FILE.write_text("run: run_1\nlast_updated_model: 0\ncurrent_phase: 0\n")
+            VERSION_FILE.write_text("run: run_1\nlast_updated_model: 0\ncurrent_phase: 0\nfinish_pretrain: False\n")
 
 # --------------------------------------------------------
 # Helper
 # --------------------------------------------------------
 
 def get_version_info():
-    info = {"run": "run_1", "last_updated_model": "0", "current_phase": "0"}
+    info = {"run": "run_1", "last_updated_model": "0", "current_phase": "0", "finish_pretrain": "False"}
     if VERSION_FILE.exists():
         for line in VERSION_FILE.read_text().splitlines():
             if ":" in line:

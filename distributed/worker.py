@@ -45,6 +45,12 @@ def main():
 
         server_version = int(server_info.get("last_updated_model", -1))
         server_phase = int(server_info.get("current_phase", 0))
+        finish_pretrain = server_info.get("finish_pretrain", "False")
+
+        if finish_pretrain.lower() != "true":
+            print("Server indicates pretraining is not finished. Waiting...")
+            time.sleep(10)
+            continue
 
         if server_version != local_version or generator.latest_model_path is None:
             print(f"Downloading model version {server_version}")

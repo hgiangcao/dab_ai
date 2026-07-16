@@ -27,6 +27,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 from tqdm import tqdm
+from torch.utils.data import Dataset, DataLoader
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
@@ -63,8 +64,8 @@ def encode_board(game: DotsAndBoxesGame) -> np.ndarray:
       ch2: boxes owned by player 1
       ch3: boxes owned by player -1
     """
-    lines = game.lines           # 1-D array of line states
-    boxes = game.boxes           # 2-D (SIZE x SIZE) array of box owners
+    lines = game.l           # 1-D array of line states
+    boxes = game.b           # 2-D (SIZE x SIZE) array of box owners
 
     h, v_mat = DotsAndBoxesGame.l_to_h_v(lines)
     size = game.SIZE
@@ -129,53 +130,60 @@ def game_record_to_examples(record: dict, game_size: int = 5):
     return examples
 
 
-def augment_examples(examples):
+class GameDataset(Dataset):
     """
-    Apply 8-fold symmetry augmentation (same as AlphaZero training).
-    Input:  list of (board_state, policy, value)
-    Output: augmented list of same format
+    PyTorch Dataset for game examples that applies 8-fold symmetry augmentation on the fly.
     """
-    augmented = []
-    for board_state, pi, value in examples:
+    def __init__(self, examples):
+        self.examples = examples
+
+    def __len__(self):
+        # We apply 8-fold augmentation, so the dataset is 8x the size
+        return len(self.examples) * 8
+
+    def __getitem__(self, idx):
+        example_idx = idx // 8
+        aug_idx = idx % 8
+        board_state, pi, value = self.examples[example_idx]
+
         # board_state shape: (4, size+1, size+1)
-        # Recover lines representation from board channels
         size = board_state.shape[1] - 1
-        n_lines = 2 * size * (size + 1)
 
         # Reconstruct lines array from h/v channels
-        h_ch  = board_state[0, :size + 1, :size]    # (size+1, size)
-        v_ch  = board_state[1, :size, :size + 1]    # (size, size+1)
+        h_ch  = board_state[0, :size + 1, :size]
+        v_ch  = board_state[1, :size, :size + 1]
         lines = DotsAndBoxesGame.h_v_to_l(h_ch, v_ch)
 
         boxes_p1 = board_state[2, :size, :size]
         boxes_m1 = board_state[3, :size, :size]
         boxes = boxes_p1.astype(float) - boxes_m1.astype(float)
 
-        pi_lines = pi  # already in line-index space
+        pi_lines = pi
 
-        for aug_lines, aug_boxes, aug_pi in zip(
-            DotsAndBoxesGame.get_rotations_and_reflections_lines(lines),
-            DotsAndBoxesGame.get_rotations_and_reflections_boxes(boxes),
-            DotsAndBoxesGame.get_rotations_and_reflections_lines(pi_lines)
-        ):
-            h, v_mat = DotsAndBoxesGame.l_to_h_v(aug_lines)
+        # Apply augmentation for this specific aug_idx
+        aug_lines = DotsAndBoxesGame.get_rotations_and_reflections_lines(lines)[aug_idx]
+        aug_boxes = DotsAndBoxesGame.get_rotations_and_reflections_boxes(boxes)[aug_idx]
+        aug_pi = DotsAndBoxesGame.get_rotations_and_reflections_lines(pi_lines)[aug_idx]
 
-            c1 = np.zeros((size + 1, size + 1))
-            c1[:size + 1, :size] = h
+        h, v_mat = DotsAndBoxesGame.l_to_h_v(aug_lines)
 
-            c2 = np.zeros((size + 1, size + 1))
-            c2[:size, :size + 1] = v_mat
+        c1 = np.zeros((size + 1, size + 1))
+        c1[:size + 1, :size] = h
 
-            c3 = np.zeros((size + 1, size + 1))
-            c3[:size, :size] = (aug_boxes == 1).astype(float)
+        c2 = np.zeros((size + 1, size + 1))
+        c2[:size, :size + 1] = v_mat
 
-            c4 = np.zeros((size + 1, size + 1))
-            c4[:size, :size] = (aug_boxes == -1).astype(float)
+        c3 = np.zeros((size + 1, size + 1))
+        c3[:size, :size] = (aug_boxes == 1).astype(float)
 
-            aug_board = np.stack([c1, c2, c3, c4])
-            augmented.append((aug_board, aug_pi.astype(np.float32), value))
+        c4 = np.zeros((size + 1, size + 1))
+        c4[:size, :size] = (aug_boxes == -1).astype(float)
 
-    return augmented
+        aug_board = np.stack([c1, c2, c3, c4])
+
+        return torch.FloatTensor(aug_board.astype(np.float32)), \
+               torch.FloatTensor(aug_pi.astype(np.float32)), \
+               torch.tensor(value, dtype=torch.float32)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -195,22 +203,23 @@ def load_examples_from_jsonl(filepath: str, game_size: int = 5):
             try:
                 record = json.loads(line)
                 examples.extend(game_record_to_examples(record, game_size))
-            except Exception:
+            except Exception as  e:
+                print (e)
                 continue
-
+    print (len(examples),"records")
     return examples
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Supervised training loop
 # ─────────────────────────────────────────────────────────────────────────────
-def pretrain(nnet: NNetWrapper, examples, args=PRETRAIN_ARGS, writer=None, start_step=0):
+def pretrain(nnet: NNetWrapper, dataset: Dataset, args=PRETRAIN_ARGS, writer=None, start_step=0):
     """
-    Run supervised pretraining on the provided examples.
+    Run supervised pretraining on the provided dataset using DataLoader.
 
     Args:
         nnet:       NNetWrapper instance (will be trained in-place)
-        examples:   list of (board_state, policy, value)
+        dataset:    GameDataset instance
         args:       pretrain hyperparameters
         writer:     optional TensorBoard SummaryWriter
         start_step: global step offset for TensorBoard
@@ -229,27 +238,28 @@ def pretrain(nnet: NNetWrapper, examples, args=PRETRAIN_ARGS, writer=None, start
     )
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-5)
 
-    batch_size  = args.batch_size
-    n_examples  = len(examples)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=8,
+        pin_memory=True
+    )
+
     global_step = start_step
 
     last_pi, last_v, last_total = 0.0, 0.0, 0.0
 
     for epoch in range(args.epochs):
         nnet.nnet.train()
-        np.random.shuffle(examples)
 
-        n_batches = max(1, n_examples // batch_size)
         pi_losses, v_losses, total_losses = [], [], []
 
-        bar = tqdm(range(n_batches), desc=f"Pretrain Epoch {epoch + 1}/{args.epochs}")
-        for _ in bar:
-            idx = np.random.randint(n_examples, size=batch_size)
-            boards, pis, vs = zip(*[examples[i] for i in idx])
-
-            boards_t = torch.FloatTensor(np.array(boards).astype(np.float32)).to(device)
-            pis_t    = torch.FloatTensor(np.array(pis)).to(device)
-            vs_t     = torch.FloatTensor(np.array(vs).astype(np.float32)).to(device)
+        bar = tqdm(dataloader, desc=f"Pretrain Epoch {epoch + 1}/{args.epochs}")
+        for boards_t, pis_t, vs_t in bar:
+            boards_t = boards_t.to(device)
+            pis_t    = pis_t.to(device)
+            vs_t     = vs_t.to(device)
 
             out_pi, out_v = nnet.nnet(boards_t)
 
@@ -312,50 +322,39 @@ def run_pretraining(nnet: NNetWrapper, run_dir: str, writer=None, game_size: int
     Returns:
         True if pretraining was performed, False if skipped.
     """
-    pretrained_path = os.path.join(run_dir, "pretrained.pth.tar")
-
-    if os.path.exists(pretrained_path):
-        # Pretraining already done in a previous run.
-        # Do NOT reload pretrained weights — the caller already loaded the latest
-        # AZ checkpoint (which is more up-to-date than the pretrained snapshot).
-        print(f"[Pretrain] pretrained.pth.tar found. Pretraining already completed — skipping.")
-        return False
 
     # ── Collect data from all available log files ──────────────────────────
     all_examples = []
 
-    bot_log  = os.path.join(PROJECT_ROOT, "game_logs_bot.jsonl")
-    rand_log = os.path.join(PROJECT_ROOT, "game_logs.jsonl")
+    bot_log = os.path.join(PROJECT_ROOT, "game_logs.jsonl")
 
-    for logfile in [bot_log, rand_log]:
+    for logfile in [bot_log]:
         exs = load_examples_from_jsonl(logfile, game_size)
         if exs:
             print(f"[Pretrain] Loaded {len(exs):,} raw examples from {os.path.basename(logfile)}")
             all_examples.extend(exs)
 
     if not all_examples:
-        print("[Pretrain] No game log files found (game_logs_bot.jsonl / game_logs.jsonl). Skipping pretraining.")
+        print("[Pretrain] No game log files found (game_logs.jsonl). Skipping pretraining.")
         return False
 
     print(f"[Pretrain] Total raw examples: {len(all_examples):,}")
 
     # ── Augment ────────────────────────────────────────────────────────────
-    try:
-        augmented = augment_examples(all_examples)
-        print(f"[Pretrain] After 8-fold augmentation: {len(augmented):,} examples")
-    except Exception as e:
-        print(f"[Pretrain] Augmentation failed ({e}), using raw examples.")
-        augmented = all_examples
+    dataset = GameDataset(all_examples)
+    print(f"[Pretrain] Initialized GameDataset with {len(dataset):,} augmented examples (8-fold symmetry)")
 
     # ── Train ──────────────────────────────────────────────────────────────
-    print(f"\n[Pretrain] Starting supervised pretraining on {len(augmented):,} examples "
+    print(f"\n[Pretrain] Starting supervised pretraining on {len(dataset):,} examples "
           f"for {PRETRAIN_ARGS.epochs} epochs...")
-    pi_loss, v_loss, total_loss = pretrain(nnet, augmented, PRETRAIN_ARGS, writer)
+    pi_loss, v_loss, total_loss = pretrain(nnet, dataset, PRETRAIN_ARGS, writer)
     print(f"[Pretrain] Done. Final losses — pi: {pi_loss:.4f} | v: {v_loss:.4f} | total: {total_loss:.4f}")
 
     # ── Save to all checkpoint locations so every component starts from pretrained weights ──
     os.makedirs(run_dir, exist_ok=True)
     state = {'state_dict': nnet.nnet.state_dict()}
+    
+    pretrained_path = os.path.join(run_dir, "pretrained.pth.tar")
 
     # 1. pretrained.pth.tar — existence marker so we don't redo pretraining on restart
     torch.save(state, pretrained_path)

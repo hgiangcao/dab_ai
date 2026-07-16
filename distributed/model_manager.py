@@ -46,6 +46,21 @@ def increase_version():
                     f.write(line)
     return new_version
 
+def set_pretrain_finished():
+    """
+    Update version.txt to indicate that pretraining is finished.
+    """
+    if os.path.exists(config.VERSION_FILE):
+        with open(config.VERSION_FILE, "r") as f:
+            lines = f.readlines()
+            
+        with open(config.VERSION_FILE, "w") as f:
+            for line in lines:
+                if line.startswith("finish_pretrain:"):
+                    f.write("finish_pretrain: True\n")
+                else:
+                    f.write(line)
+
 def get_current_phase():
     if os.path.exists(config.VERSION_FILE):
         with open(config.VERSION_FILE, "r") as f:
