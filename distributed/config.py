@@ -29,6 +29,7 @@ def get_current_model_dir():
 BATCH_SIZE = project_config.BATCH_SIZE
 EPOCHS = project_config.EPOCHS
 LEARNING_RATE = project_config.LEARNING_RATE
+MAX_WORKERS = project_config.MAX_WORKERS
 MAX_REPLAY_SIZE = project_config.MAX_REPLAY_SIZE
 MIN_REPLAY_SIZE = project_config.MIN_REPLAY_SIZE
 EVAL_GAMES = project_config.EVAL_GAMES
