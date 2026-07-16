@@ -99,7 +99,7 @@ def build_worker_chunks(
     if not episode_specs:
         return []
 
-    cpu_workers = max(1, min(4, multiprocessing.cpu_count() - 1))
+    cpu_workers = max(1, min(config.MAX_WORKERS, multiprocessing.cpu_count() - 1))
     if max_workers is not None:
         cpu_workers = min(cpu_workers, max_workers)
 
