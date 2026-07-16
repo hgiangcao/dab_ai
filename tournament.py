@@ -86,17 +86,27 @@ def run_single_matchup(args):
     a1_wins = 0
     a2_wins = 0
     draws = 0
+    game_records = []
     
     for i in tqdm(range(num_games), desc=f"Playing {agent1_name} vs {agent2_name}"):
         # Alternate who starts to ensure fairness
         starting_player = 1 if (i % 2 == 0) else -1
         game = DotsAndBoxesGame(size=size, starting_player=starting_player)
         
+        game_moves = []
+        game_policies = []
+        
         while game.is_running():
             if game.current_player == 1:
                 move = agent1.get_move(game)
             else:
                 move = agent2.get_move(game)
+            
+            game_moves.append(int(move))
+            dummy_pi = [0.0] * game.N_LINES
+            dummy_pi[move] = 1.0
+            game_policies.append(dummy_pi)
+            
             game.execute_move(move)
             
         if game.result == 1:
@@ -106,7 +116,13 @@ def run_single_matchup(args):
         else:
             draws += 1
             
-    return agent1_name, agent2_name, a1_wins, a2_wins, draws
+        game_records.append({
+            "winner": int(game.result),
+            "moves": game_moves,
+            "policies": game_policies
+        })
+            
+    return agent1_name, agent2_name, a1_wins, a2_wins, draws, game_records
 
 def plot_heatmap(matrix, agent_names, output_path):
     plt.figure(figsize=(10, 8))
@@ -148,13 +164,13 @@ def main():
         "Greedy", 
         "Greedy Chain",
         "Alpha-Beta (0.1s)", 
-        "Alpha-Beta (0.5s)", 
+        # "Alpha-Beta (0.5s)", 
         "Alpha-Beta v1 (0.1s)",
-        "Alpha-Beta v1 (0.5s)",
+        # "Alpha-Beta v1 (0.5s)",
         "Alpha-Beta v2 (0.1s)",
-        "Alpha-Beta v2 (0.5s)",
+        # "Alpha-Beta v2 (0.5s)",
         "MCTS (0.1s)", 
-        "MCTS (0.5s)",
+        # "MCTS (0.5s)",
     ]
     n_agents = len(agent_names)
     
@@ -182,18 +198,27 @@ def main():
     # Map name to matrix index
     name_to_idx = {name: idx for idx, name in enumerate(agent_names)}
     
-    # Fill in matchup results
-    for a1_name, a2_name, a1_wins, a2_wins, draws in results:
-        idx1 = name_to_idx[a1_name]
-        idx2 = name_to_idx[a2_name]
-        
-        # Winrate of Agent 1 against Agent 2
-        wr1 = (a1_wins + 0.5 * draws) / args.games
-        # Winrate of Agent 2 against Agent 1
-        wr2 = (a2_wins + 0.5 * draws) / args.games
-        
-        winrate_matrix[idx1][idx2] = wr1
-        winrate_matrix[idx2][idx1] = wr2
+    # Fill in matchup results and save game logs
+    import json
+    
+    log_path = "game_logs_bot.jsonl"
+    print(f"Saving played tournament games to {log_path}...")
+    with open(log_path, "a") as f_log:
+        for a1_name, a2_name, a1_wins, a2_wins, draws, game_records in results:
+            idx1 = name_to_idx[a1_name]
+            idx2 = name_to_idx[a2_name]
+            
+            # Save game records to file
+            for record in game_records:
+                f_log.write(json.dumps(record) + '\n')
+            
+            # Winrate of Agent 1 against Agent 2
+            wr1 = (a1_wins + 0.5 * draws) / args.games
+            # Winrate of Agent 2 against Agent 1
+            wr2 = (a2_wins + 0.5 * draws) / args.games
+            
+            winrate_matrix[idx1][idx2] = wr1
+            winrate_matrix[idx2][idx1] = wr2
 
     # Print results to stdout
     print("\n--- Winrate Matrix (Row Agent vs Column Opponent) ---")
