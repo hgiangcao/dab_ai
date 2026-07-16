@@ -276,12 +276,13 @@ class DotsAndBoxesGame:
         b = np.copy(b)
         rotations = [np.copy(b)]
         for i in range(3):
-            rotations.append(np.rot90(b))
+            b = np.rot90(b)
+            rotations.append(np.copy(b))
 
         # reflections
         reflections = []
-        for b in rotations:
-            reflections.append(np.fliplr(b))
+        for b_rot in rotations:
+            reflections.append(np.fliplr(b_rot))
 
         return rotations + reflections
 
