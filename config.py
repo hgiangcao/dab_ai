@@ -38,6 +38,7 @@ def get_current_model_dir():
 BATCH_SIZE = 512
 EPOCHS = 10
 LEARNING_RATE = 0.0005
+MAX_WORKERS = 8
 
 # Replay buffer defaults
 MAX_REPLAY_SIZE = 200000

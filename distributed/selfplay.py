@@ -123,7 +123,7 @@ class SelfPlayGenerator:
         phase_decisive = 0
         mp_context = multiprocessing.get_context('spawn')
         
-        max_workers = max(1, min(4, multiprocessing.cpu_count() - 1))
+        max_workers = max(1, min(config.MAX_WORKERS, multiprocessing.cpu_count() - 1))
         worker_args_list = build_worker_chunks(
             self.game_size,
             self.latest_model_path,

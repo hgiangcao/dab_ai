@@ -6,6 +6,7 @@ import numpy as np
 from collections import deque
 from tqdm import tqdm
 import multiprocessing
+import config
 import concurrent.futures
 import io
 import torch
@@ -57,7 +58,7 @@ def get_selfplay_executor(latest_model_path, mcts_class, args, game_size, max_wo
     global _SELFPLAY_EXECUTOR, _SELFPLAY_EXECUTOR_MODEL_SIGNATURE, _SELFPLAY_EXECUTOR_MAX_WORKERS
 
     if max_workers is None:
-        max_workers = max(1, min(4, multiprocessing.cpu_count() - 1))
+        max_workers = max(1, min(config.MAX_WORKERS, multiprocessing.cpu_count() - 1))
 
     model_signature = _get_model_signature(latest_model_path)
 
