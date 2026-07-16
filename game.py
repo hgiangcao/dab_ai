@@ -115,6 +115,24 @@ class DotsAndBoxesGame:
         for box in boxes_captured:
             self.b[box[0]][box[1]] = 0.0
 
+    def clone(self, track_history: bool = True) -> 'DotsAndBoxesGame':
+        """Fast clone: copies only essential mutable state, avoiding copy.deepcopy overhead.
+        
+        Args:
+            track_history: If False, skip copying the undo history (saves time when
+                           the caller will never call undo_move on the clone, e.g. MCTS).
+        """
+        c = object.__new__(DotsAndBoxesGame)
+        c.SIZE = self.SIZE
+        c.N_LINES = self.N_LINES
+        c.N_BOXES = self.N_BOXES
+        c.current_player = self.current_player
+        c.result = self.result
+        c.l = self.l.copy()
+        c.b = self.b.copy()
+        c._history = list(self._history) if track_history else []
+        return c
+
 
     def __eq__(self, obj) -> bool:
         if obj is None:
@@ -139,10 +157,19 @@ class DotsAndBoxesGame:
         if self.result is not None:
             return
 
-        # Only end the game when all lines are filled
-        if np.count_nonzero(self.l == 0) == 0:
-            p1_score = int(np.sum(self.b == 1))
-            p2_score = int(np.sum(self.b == -1))
+        p1_score = int(np.sum(self.b == 1))
+        p2_score = int(np.sum(self.b == -1))
+        remaining_boxes = self.N_BOXES - p1_score - p2_score
+
+        # Early termination: result is already mathematically decided
+        # If one player leads by more than all remaining uncaptured boxes,
+        # the opponent cannot catch up regardless of who captures what remains.
+        if p1_score > p2_score + remaining_boxes:
+            self.result = 1
+        elif p2_score > p1_score + remaining_boxes:
+            self.result = -1
+        elif remaining_boxes == 0:
+            # All boxes captured: normal end-of-game scoring
             if p1_score > p2_score:
                 self.result = 1
             elif p2_score > p1_score:

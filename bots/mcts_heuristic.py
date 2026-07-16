@@ -120,23 +120,13 @@ class MCTS:
         return best_child
 
     def _rollout(self, s, rollout_player):
+        """Pure random rollout — play random moves until the game ends."""
         moves_made = 0
         while s.is_running():
             valid = s.get_valid_moves()
-            
-            # 1. Capture if possible
-            move = self._find_capture(s, valid)
-            # 2. Safe moves
-            if move is None:
-                safe_moves = self._find_safe(s, valid)
-                if safe_moves:
-                    move = random.choice(safe_moves)
-                else:
-                    move = random.choice(valid)
-                    
-            s.execute_move(move)
+            s.execute_move(random.choice(valid))
             moves_made += 1
-            
+
         result = s.result
         if result == rollout_player:
             val = 1.0
@@ -144,7 +134,7 @@ class MCTS:
             val = 0.0
         else:
             val = -1.0
-            
+
         return val, moves_made
 
     def _find_capture(self, s, valid_moves):
@@ -171,36 +161,12 @@ class MCTS:
         return safe_moves
         
     def _order_expansion_moves(self, s, valid_moves):
-        if not valid_moves: return []
-        captures = []
-        safe = []
-        remaining = []
-        for move in valid_moves:
-            is_capture = False
-            for box in s.get_boxes_of_line(move):
-                lines = s.get_lines_of_box(box)
-                if sum(1 for ln in lines if s.l[ln] != 0) == 3:
-                    is_capture = True
-                    break
-            if is_capture:
-                captures.append(move)
-                continue
-                
-            is_safe = True
-            for box in s.get_boxes_of_line(move):
-                lines = s.get_lines_of_box(box)
-                if sum(1 for ln in lines if s.l[ln] != 0) == 2:
-                    is_safe = False
-                    break
-            if is_safe:
-                safe.append(move)
-            else:
-                remaining.append(move)
-                
-        random.shuffle(captures)
-        random.shuffle(safe)
-        random.shuffle(remaining)
-        return captures + safe + remaining
+        """Random ordering for expansion — no heuristic bias."""
+        if not valid_moves:
+            return []
+        moves = list(valid_moves)
+        random.shuffle(moves)
+        return moves
 
 
 # ---------------------------------------------------------------------------

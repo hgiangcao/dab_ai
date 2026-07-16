@@ -1,27 +1,29 @@
-import copy
+import time
 import math
 import numpy as np
 
 class AZNode:
+    __slots__ = ('a', 's', 'children', 'Q', 'N', 'total_N', 'P', 'valid_moves')
+
     def __init__(self, parent, s, a: int):
         self.a = a
         self.s = s
-        self.children = []
+        self.children = {}      # dict keyed by action: O(1) lookup vs O(n) list scan
         self.Q = {}
         self.N = {}
+        self.total_N = 0        # cached sum of N values; updated in backup() for O(1) sqrt
         self.P = None
+        self.valid_moves = None # cached after leaf expansion; avoids repeated get_valid_moves()
         if parent is not None:
-            parent.children.append(self)
+            parent.children[a] = self
 
     def get_child_by_move(self, a: int):
-        for child in self.children:
-            if child.a == a:
-                return child
-        return None
+        return self.children.get(a)
+
 
 class MCTS:
     def __init__(self, model, mcts_parameters: dict):
-        self.model = model  # This is your NNetWrapper instance
+        self.model = model
         self.n_simulations = mcts_parameters.get("n_simulations", 200)
         self.c_puct = mcts_parameters["c_puct"]
         self.dirichlet_eps = mcts_parameters.get("dirichlet_eps", 0.0)
@@ -30,7 +32,7 @@ class MCTS:
         self.max_depth_reached = 0
 
     def play(self, game_state, temp: int, add_root_noise: bool = False) -> list:
-        root = AZNode(parent=None, s=copy.deepcopy(game_state), a=None)
+        root = AZNode(parent=None, s=game_state.clone(track_history=False), a=None)
         valid_moves = root.s.get_valid_moves()
         self.max_depth_reached = 0
 
@@ -43,7 +45,6 @@ class MCTS:
             dirichlet_noise[valid_moves] = np.random.dirichlet([self.dirichlet_alpha] * len(valid_moves))
 
         if self.time_limit is not None:
-            import time
             start_time = time.time()
             while time.time() - start_time < self.time_limit:
                 self.search(root, is_root=True, dirichlet_noise=dirichlet_noise, current_depth=0)
@@ -75,47 +76,46 @@ class MCTS:
 
     def search(self, node: AZNode, is_root: bool = False, dirichlet_noise: np.ndarray = None, current_depth: int = 0) -> float:
         self.max_depth_reached = max(self.max_depth_reached, current_depth)
-        
+
         if not node.s.is_running():
             result = node.s.result
             if node.s.current_player == result:
                 return 1.0
             return 0.0 if result == 0 else -1.0
 
-        # Leaf expansion
+        # Leaf expansion: call NN once, cache policy and valid moves on this node
         if node.P is None:
-            # FIX: Format tracking states into a 4-channel tensor matching model.py input profile
             h, v = node.s.l_to_h_v(node.s.get_canonical_lines())
-            # Create matching dummy 4-plane feature representation, padded to (size+1)x(size+1)
             size = node.s.SIZE
-            
+
             c1 = np.zeros((size+1, size+1))
             c1[:size+1, :size] = h
-            
+
             c2 = np.zeros((size+1, size+1))
             c2[:size, :size+1] = v
-            
-            p1_boxes = np.where(node.s.get_canonical_boxes() == 1, 1.0, 0.0)
+
+            canonical_boxes = node.s.get_canonical_boxes()
+            p1_boxes = np.where(canonical_boxes == 1, 1.0, 0.0)
             c3 = np.zeros((size+1, size+1))
             c3[:size, :size] = p1_boxes
-            
-            p2_boxes = np.where(node.s.get_canonical_boxes() == -1, 1.0, 0.0)
+
+            p2_boxes = np.where(canonical_boxes == -1, 1.0, 0.0)
             c4 = np.zeros((size+1, size+1))
             c4[:size, :size] = p2_boxes
-            
+
             stacked_board = np.stack([c1, c2, c3, c4], axis=0)
-            
-            # Call our model wrapper's predict function
+
             p, v = self.model.predict(stacked_board)
             v = float(np.asarray(v).reshape(-1)[0])
 
-            valid_moves = node.s.get_valid_moves()
-            node.P = self._mask_and_normalize_policy(p, node.s.N_LINES, valid_moves)
+            # Cache valid_moves on the node — avoid redundant get_valid_moves() calls
+            node.valid_moves = node.s.get_valid_moves()
+            node.P = self._mask_and_normalize_policy(p, node.s.N_LINES, node.valid_moves)
             return v
 
         a = self.select(node, is_root, dirichlet_noise)
-        child = node.get_child_by_move(a)
-        
+        child = node.children.get(a)  # O(1) dict lookup
+
         if child is None:
             child = self.expand(node, a)
 
@@ -128,17 +128,19 @@ class MCTS:
     def select(self, node: AZNode, is_root: bool, dirichlet_noise: np.ndarray) -> int:
         maximum = float('-inf')
         a_max = -1
-        N_sum = sum(node.N.values())
-        N_sqrt = math.sqrt(N_sum) if N_sum > 0 else 1
 
-        valid_moves = node.s.get_valid_moves()
+        # O(1) total_N lookup instead of O(children) sum()
+        N_sqrt = math.sqrt(node.total_N) if node.total_N > 0 else 1
+
+        # Use cached valid_moves — no repeated get_valid_moves() call
+        valid_moves = node.valid_moves
         P = self._root_policy(node, valid_moves, dirichlet_noise) if is_root else node.P
 
         for a in valid_moves:
             p = P[a]
-            q = node.Q[a] if a in node.N else 0.0
-            n = node.N[a] if a in node.N else 0
-            
+            q = node.Q.get(a, 0.0)
+            n = node.N.get(a, 0)
+
             u = self.c_puct * p * N_sqrt / (1 + n)
             if q + u > maximum:
                 maximum = q + u
@@ -148,7 +150,8 @@ class MCTS:
         return a_max
 
     def expand(self, node: AZNode, a: int) -> AZNode:
-        s = copy.deepcopy(node.s)
+        # MCTS never calls undo_move() on tree nodes, so skip copying history
+        s = node.s.clone(track_history=False)
         s.execute_move(a)
         return AZNode(parent=node, s=s, a=a)
 
@@ -158,11 +161,10 @@ class MCTS:
             node.N[a] = 1
         else:
             n = node.N[a]
-            self.backup_q_update(node, a, v, n)
-
-    def backup_q_update(self, node, a, v, n):
-        node.Q[a] = (n * node.Q[a] + v) / (n + 1)
-        node.N[a] += 1
+            node.Q[a] = (n * node.Q[a] + v) / (n + 1)
+            node.N[a] = n + 1
+        # Update cached total_N for O(1) sqrt in select()
+        node.total_N += 1
 
     @staticmethod
     def _uniform_policy(n_actions: int, valid_moves: list) -> np.ndarray:
@@ -190,10 +192,12 @@ class MCTS:
         return self._uniform_policy(n_actions, valid_moves)
 
     def _root_policy(self, node: AZNode, valid_moves: list, dirichlet_noise: np.ndarray = None) -> np.ndarray:
-        policy = node.P
-        if dirichlet_noise is not None:
-            base_policy = self._mask_and_normalize_policy(policy, node.s.N_LINES, valid_moves)
-            policy = (1.0 - self.dirichlet_eps) * base_policy + self.dirichlet_eps * dirichlet_noise
+        # node.P is already normalized and masked from leaf expansion.
+        # Only re-mix if we have Dirichlet noise to add.
+        if dirichlet_noise is None:
+            return node.P
+        base_policy = self._mask_and_normalize_policy(node.P, node.s.N_LINES, valid_moves)
+        policy = (1.0 - self.dirichlet_eps) * base_policy + self.dirichlet_eps * dirichlet_noise
         return self._mask_and_normalize_policy(policy, node.s.N_LINES, valid_moves)
 
 
@@ -205,6 +209,5 @@ class MCTSAgent(BaseAgent):
         self.mcts = MCTS(model, mcts_parameters)
 
     def get_move(self, game_state) -> int:
-        # Use temp=0 to always select the strongest move during evaluation/play
         probs = self.mcts.play(game_state, temp=0, add_root_noise=False)
         return int(np.argmax(probs))
