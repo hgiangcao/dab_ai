@@ -22,10 +22,11 @@ class AZNode:
 class MCTS:
     def __init__(self, model, mcts_parameters: dict):
         self.model = model  # This is your NNetWrapper instance
-        self.n_simulations = mcts_parameters["n_simulations"]
+        self.n_simulations = mcts_parameters.get("n_simulations", 200)
         self.c_puct = mcts_parameters["c_puct"]
-        self.dirichlet_eps = mcts_parameters["dirichlet_eps"]
-        self.dirichlet_alpha = mcts_parameters["dirichlet_alpha"]
+        self.dirichlet_eps = mcts_parameters.get("dirichlet_eps", 0.0)
+        self.dirichlet_alpha = mcts_parameters.get("dirichlet_alpha", 0.0)
+        self.time_limit = mcts_parameters.get("time_limit", None)
 
     def play(self, game_state, temp: int, add_root_noise: bool = False) -> list:
         root = AZNode(parent=None, s=copy.deepcopy(game_state), a=None)
@@ -40,8 +41,14 @@ class MCTS:
             dirichlet_noise = np.zeros((root.s.N_LINES,), dtype=np.float64)
             dirichlet_noise[valid_moves] = np.random.dirichlet([self.dirichlet_alpha] * len(valid_moves))
 
-        for _ in range(self.n_simulations):
-            self.search(root, is_root=True, dirichlet_noise=dirichlet_noise, current_depth=0)
+        if self.time_limit is not None:
+            import time
+            start_time = time.time()
+            while time.time() - start_time < self.time_limit:
+                self.search(root, is_root=True, dirichlet_noise=dirichlet_noise, current_depth=0)
+        else:
+            for _ in range(self.n_simulations):
+                self.search(root, is_root=True, dirichlet_noise=dirichlet_noise, current_depth=0)
 
         counts = np.array([root.N.get(a, 0) for a in range(root.s.N_LINES)], dtype=np.float64)
         counts_sum = float(counts.sum())

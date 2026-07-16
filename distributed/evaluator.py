@@ -28,6 +28,7 @@ eval_args = dotdict({
     'c_puct': config.MCTS_C_PUCT,
     'dirichlet_eps': 0.0,
     'dirichlet_alpha': config.MCTS_DIRICHLET_ALPHA,
+    'time_limit': 0.1,  # 100ms time limit for AlphaZero MCTS in evaluation
     'device': 'cpu'  # CPU allows us to run evaluation in parallel efficiently
 })
 
