@@ -133,13 +133,21 @@ def _worker_play_single(p1_starts):
     game = DotsAndBoxesGame(size=5, early_stopping=True)
     players = {1: agent_cand, -1: agent_opp} if p1_starts else {1: agent_opp, -1: agent_cand}
 
+    depths = []
     while game.is_running():
         cur_player = game.current_player
         action = players[cur_player](game)
+        
+        # If the candidate just played, record its max search depth for this move
+        if (p1_starts and cur_player == 1) or (not p1_starts and cur_player == -1):
+            depths.append(mcts_cand.max_depth_reached)
+            
         game.execute_move(action)
 
     # Return 1 if candidate won, -1 if opponent won, 0 for draw
-    return game.result if p1_starts else -game.result
+    result = game.result if p1_starts else -game.result
+    avg_depth = sum(depths) / len(depths) if depths else 0
+    return result, avg_depth
 
 
 def play_game(model1_path, model2_path, p1_starts=True):
@@ -156,6 +164,7 @@ def _run_pool(candidate_path, opp_identifier, num_games, desc, num_workers):
     Each worker loads the models ONCE via the initializer — no per-game reloads.
     """
     wins, losses, draws = 0, 0, 0
+    total_depth = 0.0
     half = num_games // 2
     p1_starts_list = [idx < half for idx in range(num_games)]
 
@@ -169,7 +178,8 @@ def _run_pool(candidate_path, opp_identifier, num_games, desc, num_workers):
         futures = [executor.submit(_worker_play_single, p1) for p1 in p1_starts_list]
         for future in tqdm(concurrent.futures.as_completed(futures), total=num_games, desc=desc):
             try:
-                res = future.result()
+                res, depth = future.result()
+                total_depth += depth
                 if res == 1:
                     wins += 1
                 elif res == -1:
@@ -179,7 +189,8 @@ def _run_pool(candidate_path, opp_identifier, num_games, desc, num_workers):
             except Exception as e:
                 print(f"Match execution failed: {e}")
 
-    return wins, losses, draws
+    avg_depth = total_depth / num_games if num_games > 0 else 0
+    return wins, losses, draws, avg_depth
 
 
 def evaluate_model(candidate_model_path, best_model_path, num_games):
@@ -192,19 +203,23 @@ def evaluate_model(candidate_model_path, best_model_path, num_games):
     num_workers = max(1, min(num_games, config.MAX_WORKERS, multiprocessing.cpu_count() - 1))
     print(f"Evaluating candidate model over {num_games} arena games using {num_workers} processes...")
 
-    wins, losses, draws = _run_pool(
+    wins, losses, draws, avg_depth = _run_pool(
         candidate_model_path, best_model_path, num_games,
         desc="Arena Eval", num_workers=num_workers
     )
 
     total_decisive = wins + losses
     win_rate = wins / total_decisive if total_decisive > 0 else 0.5
+    
+    print(f"Vs Best -> Wins: {wins} | Losses: {losses} | Draws: {draws} (Win Rate: {win_rate:.2%})")
+    print(f"Candidate MCTS Average Search Depth: {avg_depth:.2f}")
 
     return {
         "wins": wins,
         "loss": losses,
         "draw": draws,
-        "win_rate": win_rate
+        "win_rate": win_rate,
+        "avg_depth": avg_depth
     }
 
 
@@ -234,13 +249,14 @@ def evaluate_baselines(candidate_model_path, num_games=10):
     baseline_win_rates = {}
     for opp_id, opp_name in baselines.items():
         print(f"Evaluating candidate against {opp_name}...")
-        wins, losses, draws = _run_pool(
+        wins, losses, draws, avg_depth = _run_pool(
             candidate_model_path, opp_id, num_games,
             desc=f"Vs {opp_name}", num_workers=num_workers
         )
         total_decisive = wins + losses
         win_rate = wins / total_decisive if total_decisive > 0 else 0.5
         print(f"Vs {opp_name} -> Wins: {wins} | Losses: {losses} | Draws: {draws} (Win Rate: {win_rate:.2%})")
+        print(f"Candidate MCTS Average Search Depth: {avg_depth:.2f}")
         baseline_win_rates[opp_name] = win_rate
 
     return baseline_win_rates
@@ -283,10 +299,10 @@ def evaluate_new_model():
     if should_promote(result):
         print(f"Result exceeds threshold ({config.PROMOTION_THRESHOLD:.2%}). Model promoted to BEST.")
         model_manager.promote_best_model()
-        return True, result['win_rate'], baseline_win_rates
+        return True, result['win_rate'], baseline_win_rates, result.get('avg_depth', 0)
     else:
         print("Model rejected.")
-        return False, result['win_rate'], baseline_win_rates
+        return False, result['win_rate'], baseline_win_rates, result.get('avg_depth', 0)
 
 if __name__ == "__main__":
     evaluate_new_model()
