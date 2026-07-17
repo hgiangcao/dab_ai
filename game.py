@@ -38,12 +38,11 @@ class DotsAndBoxesGame:
         tracks which boxes were captured by which player
         element values: {-1, 0, 1} = {box captured by player 2, box not captured yet, box captured by player 1}
     """
-    def __init__(self, size: int, starting_player: int = None, early_stopping: bool = False):
+    def __init__(self, size: int, starting_player: int = None):
 
         self.SIZE = size
         self.current_player = (1 if randint(0, 1) == 1 else -1) if starting_player is None else starting_player
         self.result = None
-        self.early_stopping = early_stopping
 
         # lines
         self.N_LINES = 2 * size * (size + 1)
@@ -129,7 +128,6 @@ class DotsAndBoxesGame:
         c.N_BOXES = self.N_BOXES
         c.current_player = self.current_player
         c.result = self.result
-        c.early_stopping = self.early_stopping
         c.l = self.l.copy()
         c.b = self.b.copy()
         c._history = list(self._history) if track_history else []
@@ -166,9 +164,9 @@ class DotsAndBoxesGame:
         # Early termination: result is already mathematically decided
         # If one player leads by more than all remaining uncaptured boxes,
         # the opponent cannot catch up regardless of who captures what remains.
-        if self.early_stopping and (p1_score > p2_score + remaining_boxes):
+        if p1_score > p2_score + remaining_boxes:
             self.result = 1
-        elif self.early_stopping and (p2_score > p1_score + remaining_boxes):
+        elif p2_score > p1_score + remaining_boxes:
             self.result = -1
         elif remaining_boxes == 0:
             # All boxes captured: normal end-of-game scoring
