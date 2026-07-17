@@ -40,7 +40,7 @@ def _worker_play_single(worker_args):
     candidate_path, opp_identifier, p1_starts = worker_args
     import copy
     
-    game = DotsAndBoxesGame(size=5)
+    game = DotsAndBoxesGame(size=5, early_stopping=True)
     
     # 1. Candidate Model
     cand_net = NNetWrapper(game, eval_args)

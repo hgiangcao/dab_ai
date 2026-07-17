@@ -340,7 +340,7 @@ def worker_play_single(worker_args):
             pi = mcts2.play(g, temp=0, add_root_noise=False)
             return np.argmax(pi)
             
-    game = DotsAndBoxesGame(size=game_size, starting_player=1)
+    game = DotsAndBoxesGame(size=game_size, starting_player=1, early_stopping=True)
     players = {1: agent1, -1: agent2} if p1_starts else {1: agent2, -1: agent1}
     
     while game.is_running():
