@@ -188,8 +188,8 @@ def evaluate_model(candidate_model_path, best_model_path, num_games):
     Each worker loads both models once (via initializer), then plays multiple games.
     Return a summary dictionary.
     """
-    # Each worker holds both models in RAM; capped by game count and CPU count.
-    num_workers = max(1, min(num_games, multiprocessing.cpu_count() - 1))
+    # Each worker holds both models in RAM; capped by config.MAX_WORKERS to prevent resource exhaustion.
+    num_workers = max(1, min(num_games, config.MAX_WORKERS, multiprocessing.cpu_count() - 1))
     print(f"Evaluating candidate model over {num_games} arena games using {num_workers} processes...")
 
     wins, losses, draws = _run_pool(
@@ -228,8 +228,8 @@ def evaluate_baselines(candidate_model_path, num_games=10):
         "greedy_chain": "GreedyChain"
     }
 
-    # Baselines only need the candidate model per worker.
-    num_workers = max(1, min(10, multiprocessing.cpu_count() - 1))
+    # Baselines only need the candidate model per worker, but we still cap at MAX_WORKERS.
+    num_workers = max(1, min(num_games, config.MAX_WORKERS, multiprocessing.cpu_count() - 1))
 
     baseline_win_rates = {}
     for opp_id, opp_name in baselines.items():
