@@ -103,7 +103,14 @@ class NNetWrapper:
     """
     def __init__(self, game, args):
         self.args = args
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Respect args.device if provided, otherwise fallback to auto-detect
+        if hasattr(args, 'device') and args.device is not None:
+            self.device = torch.device(args.device)
+        elif isinstance(args, dict) and 'device' in args and args['device'] is not None:
+            self.device = torch.device(args['device'])
+        else:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Dimensions based on game (assuming n x n boxes)
         self.board_x, self.board_y = game.getBoardSize() if hasattr(game, 'getBoardSize') else (game.SIZE, game.SIZE)
