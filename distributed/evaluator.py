@@ -135,7 +135,7 @@ def evaluate_model(candidate_model_path, best_model_path, num_games):
         worker_args_list.append((candidate_model_path, best_model_path, p1_starts))
         
     mp_context = multiprocessing.get_context('spawn')
-    num_workers = max(1, multiprocessing.cpu_count() - 1)
+    num_workers = max(1, min(8,multiprocessing.cpu_count() - 1))
     
     print(f"Evaluating candidate model over {num_games} arena games using {num_workers} processes...")
     
