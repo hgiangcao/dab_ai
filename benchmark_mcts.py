@@ -239,8 +239,10 @@ def main():
     candidate_path = os.path.join(checkpoint_dir, "checkpoint_candidate.pth.tar")
     best_path = os.path.join(checkpoint_dir, "best.pth.tar")
     
+    pretrained_path = os.path.join(checkpoint_dir, "pretrained.pth.tar")
+    
     loaded = False
-    for path in [candidate_path, best_path]:
+    for path in [pretrained_path, candidate_path, best_path]:
         if os.path.exists(path):
             try:
                 print(f"Loading weights from {path}...")
