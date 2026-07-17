@@ -91,7 +91,7 @@ def run_single_matchup(args):
     for i in tqdm(range(num_games), desc=f"Playing {agent1_name} vs {agent2_name}"):
         # Alternate who starts to ensure fairness
         starting_player = 1 if (i % 2 == 0) else -1
-        game = DotsAndBoxesGame(size=size, starting_player=starting_player)
+        game = DotsAndBoxesGame(size=size, starting_player=starting_player,early_stopping=True)
         
         game_moves = []
         game_policies = []

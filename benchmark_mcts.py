@@ -14,7 +14,7 @@ from mcts import MCTS, AZNode
 import config
 
 def get_prefilled_game(num_moves):
-    game = DotsAndBoxesGame(size=5)
+    game = DotsAndBoxesGame(size=5,early_stopping=False)
     # Use a seed for reproducibility across different runs/tests
     rng = _random.Random(42)
     for _ in range(num_moves):

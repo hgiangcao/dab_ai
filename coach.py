@@ -228,7 +228,7 @@ def worker_execute_episode_chunk(worker_args):
         p1_is_latest = random.choice([True, False])
 
         train_examples = []
-        game = DotsAndBoxesGame(size=game_size, starting_player=1)
+        game = DotsAndBoxesGame(size=game_size, starting_player=1, early_stopping=False)  # Full game for training data
 
         # Reverse Curriculum Logic: Pre-fill the board using the historical log sequence.
         if game_sequence is not None and start_fill_pct >= 0.001:
@@ -340,7 +340,7 @@ def worker_play_single(worker_args):
             pi = mcts2.play(g, temp=0, add_root_noise=False)
             return np.argmax(pi)
             
-    game = DotsAndBoxesGame(size=game_size, starting_player=1)
+    game = DotsAndBoxesGame(size=game_size, starting_player=1, early_stopping=True)  # Early stopping for faster evaluation
     players = {1: agent1, -1: agent2} if p1_starts else {1: agent2, -1: agent1}
     
     while game.is_running():

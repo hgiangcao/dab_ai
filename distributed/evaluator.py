@@ -28,7 +28,7 @@ eval_args = dotdict({
     'c_puct': config.MCTS_C_PUCT,
     'dirichlet_eps': 0.0,
     'dirichlet_alpha': config.MCTS_DIRICHLET_ALPHA,
-    'time_limit': 0.1,  # 100ms time limit for AlphaZero MCTS in evaluation
+    'time_limit': None,  # Use simulation-count mode (MCTS_NUM_SIMULATIONS), never time-limited
     'device': 'cpu'  # CPU allows us to run evaluation in parallel efficiently
 })
 
@@ -40,7 +40,7 @@ def _worker_play_single(worker_args):
     candidate_path, opp_identifier, p1_starts = worker_args
     import copy
     
-    game = DotsAndBoxesGame(size=5)
+    game = DotsAndBoxesGame(size=5, early_stopping=True)  # Early stopping for faster evaluation
     
     # 1. Candidate Model
     cand_net = NNetWrapper(game, eval_args)
