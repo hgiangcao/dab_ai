@@ -121,6 +121,7 @@ class SelfPlayGenerator:
         iteration_data = []
         phase_wins = 0
         phase_decisive = 0
+        bot_stats = {}
         mp_context = multiprocessing.get_context('spawn')
         
         max_workers = max(1, min(config.MAX_WORKERS, multiprocessing.cpu_count() - 1))
@@ -153,10 +154,11 @@ class SelfPlayGenerator:
                     chunk_results = future.result()
                     for examples, length, depth, opp_type, latest_won, latest_drawn in chunk_results:
                         iteration_data.extend(examples)
-                        if not latest_drawn:
-                            phase_decisive += 1
-                            if latest_won:
-                                phase_wins += 1
+                        if opp_type != "self":
+                            if not latest_drawn:
+                                phase_decisive += 1
+                                if latest_won:
+                                    phase_wins += 1
                                 
                         if opp_type not in bot_stats:
                             bot_stats[opp_type] = {'games': 0, 'wins': 0, 'decisive': 0}
