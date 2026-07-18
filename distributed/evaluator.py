@@ -237,13 +237,13 @@ def evaluate_baselines(candidate_model_path, num_games=10):
     return baseline_win_rates
 
 
-def evaluate_new_model():
+def evaluate_new_model(iteration=None):
     """
     High-level evaluation:
     1. Load latest candidate
     2. Load best
     3. Run games vs best
-    4. Run games vs baselines
+    4. Run games vs baselines (every 5 iterations)
     5. Decide promotion
     """
     best_path = model_manager.get_best_model_path()
@@ -254,7 +254,7 @@ def evaluate_new_model():
         
     if not os.path.exists(candidate_path):
         print(f"No candidate model found at {candidate_path} for evaluation.")
-        return False, 0.0, {}
+        return False, 0.0, {}, 0
         
     print(f"Evaluating candidate model: {candidate_path}")
         
@@ -267,9 +267,11 @@ def evaluate_new_model():
     print(f" Win Rate: {result['win_rate']:.2%}")
     print("================================================================")
     
-    print(f"\n================ EVALUATION VS BASELINES =======================")
-    baseline_win_rates = evaluate_baselines(candidate_path, num_games=10)
-    print("================================================================")
+    baseline_win_rates = {}
+    if iteration is None or iteration % 5 == 0:
+        print(f"\n================ EVALUATION VS BASELINES =======================")
+        baseline_win_rates = evaluate_baselines(candidate_path, num_games=10)
+        print("================================================================")
     
     if should_promote(result):
         print(f"Result exceeds threshold ({config.PROMOTION_THRESHOLD:.2%}). Model promoted to BEST.")

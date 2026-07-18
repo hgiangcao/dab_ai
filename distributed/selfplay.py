@@ -151,12 +151,21 @@ class SelfPlayGenerator:
                 chunk_size = futures[future]
                 try:
                     chunk_results = future.result()
-                    for examples, length, depth, latest_won, latest_drawn in chunk_results:
+                    for examples, length, depth, opp_type, latest_won, latest_drawn in chunk_results:
                         iteration_data.extend(examples)
                         if not latest_drawn:
                             phase_decisive += 1
                             if latest_won:
                                 phase_wins += 1
+                                
+                        if opp_type not in bot_stats:
+                            bot_stats[opp_type] = {'games': 0, 'wins': 0, 'decisive': 0}
+                        bot_stats[opp_type]['games'] += 1
+                        if not latest_drawn:
+                            bot_stats[opp_type]['decisive'] += 1
+                            if latest_won:
+                                bot_stats[opp_type]['wins'] += 1
+                                
                 except Exception as e:
                     print(f"Worker execution failed: {e}")
                 finally:
@@ -193,6 +202,9 @@ class SelfPlayGenerator:
         
 
         print ("Phase:", current_phase, "winrate", phase_winrate)
+        
+        import json
+        bot_stats_json = json.dumps(bot_stats)
 
         np.savez_compressed(
             filename,
@@ -205,7 +217,8 @@ class SelfPlayGenerator:
             model_version=np.array(model_version, dtype=np.int32),
             game_count=np.array(len(lines_data), dtype=np.int32),
             phase_winrate=np.array([phase_winrate], dtype=np.float32),
-            current_phase=np.array([current_phase], dtype=np.int32)
+            current_phase=np.array([current_phase], dtype=np.int32),
+            bot_stats=np.array([bot_stats_json], dtype=str)
         )
         
         print(f"Saved {len(iteration_data)} examples to {filename}")

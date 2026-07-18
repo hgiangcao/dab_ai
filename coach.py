@@ -228,7 +228,7 @@ def worker_execute_episode_chunk(worker_args):
         p1_is_latest = random.choice([True, False])
 
         train_examples = []
-        game = DotsAndBoxesGame(size=game_size, starting_player=1)
+        game = DotsAndBoxesGame(size=game_size, starting_player=1, early_stopping=True)
 
         # Reverse Curriculum Logic: Pre-fill the board using the historical log sequence.
         if game_sequence is not None and start_fill_pct >= 0.001:
@@ -278,7 +278,7 @@ def worker_execute_episode_chunk(worker_args):
 
         latest_won = (r == 1 if p1_is_latest else r == -1)
         latest_drawn = (r == 0)
-        return final_examples, episode_step, avg_depth, latest_won, latest_drawn
+        return final_examples, episode_step, avg_depth, opp_type, latest_won, latest_drawn
 
     return [run_episode(*episode_spec) for episode_spec in episode_specs]
 
