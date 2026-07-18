@@ -66,7 +66,7 @@ def augment_data(train_examples):
             
     return data_augmented
 
-def train_network(replay_data, output_model_path, nnet):
+def train_network(replay_data, output_model_path, nnet, epochs=None):
     """
     Train AlphaZero network.
     
@@ -74,13 +74,14 @@ def train_network(replay_data, output_model_path, nnet):
         replay_data: merged self-play games (loaded as tuples)
         output_model_path: path to save trained model
         nnet: the single persistent instance of the Neural Network
+        epochs: number of epochs to train
     """
         
     print(f"Augmenting dataset of {len(replay_data)} raw states...")
     augmented_memory = augment_data(replay_data)
     
     print(f"Training on {len(augmented_memory)} samples...")
-    pi_loss, v_loss, total_loss = nnet.train(augmented_memory)
+    pi_loss, v_loss, total_loss = nnet.train(augmented_memory, epochs=epochs)
     
     print(f"Training complete. Loss -> Policy: {pi_loss:.4f} | Value: {v_loss:.4f} | Total: {total_loss:.4f}")
     
@@ -120,8 +121,35 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     # 2. Claim files atomically to prevent race conditions
     claimed_files = replay_manager.claim_for_training()
     if not claimed_files:
-        print("No files in ready/ to claim. Waiting for workers...")
-        return False
+        print("No files in ready/ to claim. Trainer acting as fallback worker to generate 50 games...")
+        from selfplay import SelfPlayGenerator
+        import shutil
+        
+        generator = SelfPlayGenerator()
+        candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
+        if not os.path.exists(candidate_path):
+            candidate_path = model_manager.get_best_model_path()
+            
+        if os.path.exists(candidate_path):
+            generator.load_model(candidate_path)
+            
+        replay_file = generator.play_games(
+            num_games=50,
+            save_dir=config.REPLAY_READY,
+            worker_id="trainer_fallback",
+            model_version=iteration,
+            current_phase=model_manager.get_current_phase(),
+            epoch=iteration
+        )
+        if replay_file and os.path.exists(replay_file):
+            print(f"Trainer fallback generated {replay_file}.")
+            fname = os.path.basename(replay_file)
+            dest = os.path.join(config.REPLAY_TRAINING, fname)
+            shutil.move(replay_file, dest)
+            claimed_files.append(dest)
+        else:
+            print("Trainer fallback failed to generate games.")
+            return False
         
     # 2.5 Check Curriculum Phase Winrates
     client_winrates = []
@@ -185,7 +213,10 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
         
     # 3. Load the replay buffer from training/
     new_data = replay_manager.load_replay_buffer(claimed_files)
-    if len(new_data) < config.MIN_REPLAY_SIZE:
+    
+    is_first_time = (replay_buffer is None) or (len(replay_buffer) == 0)
+    
+    if is_first_time and len(new_data) < config.MIN_REPLAY_SIZE:
         print(f"New data size ({len(new_data)}) below minimum ({config.MIN_REPLAY_SIZE}). Waiting...")
         # Move claimed files back to ready/ so they aren't lost
         for f in claimed_files:
@@ -205,7 +236,8 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     # 4. Train candidate network
     merged_path = replay_manager.merge_replay(claimed_files)
     candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
-    losses = train_network(replay_data, candidate_path, nnet)
+    dynamic_epochs = 2 * len(claimed_files)
+    losses = train_network(replay_data, candidate_path, nnet, epochs=dynamic_epochs)
     
     if writer:
         current_lr = nnet.optimizer.param_groups[0]['lr']
@@ -329,22 +361,12 @@ def training_loop():
     while True:
         try:
             # Check how many replay files are in incoming/ and ready/
-            import glob
-            incoming = glob.glob(os.path.join(config.REPLAY_INCOMING, "*.npz"))
-            ready = glob.glob(os.path.join(config.REPLAY_READY, "*.npz"))
-            total_files = len(incoming) + len(ready)
-            
-            # Start iteration if we have multiple new files to merge
-            if total_files >= 5: 
-                success = run_training_iteration(writer, iteration, global_nnet, replay_buffer)
-                if not success:
-                    print("Iteration skipped. Sleeping 60s...")
-                    time.sleep(60)
-                else:
-                    iteration += 1
-            else:
-                print(f"Not enough replay files found (incoming+ready = {total_files}). Sleeping 60s...")
+            success = run_training_iteration(writer, iteration, global_nnet, replay_buffer)
+            if not success:
+                print("Iteration skipped. Sleeping 60s...")
                 time.sleep(60)
+            else:
+                iteration += 1
                 
         except Exception as e:
             print(f"Error during training iteration: {e}")

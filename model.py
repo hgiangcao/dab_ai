@@ -117,7 +117,7 @@ class NNetWrapper:
             self.optimizer, T_max=T_max, eta_min=1e-5
         )
 
-    def train(self, examples):
+    def train(self, examples, epochs=None):
         """
         Trains the neural network using self-play generated examples.
         examples: list of (board_state, pi, v)
@@ -127,7 +127,8 @@ class NNetWrapper:
         self.nnet.train()
 
         batch_size = self.args.batch_size
-        epochs = self.args.epochs
+        if epochs is None:
+            epochs = self.args.epochs
 
         total_pi_loss = 0.0
         total_v_loss = 0.0
