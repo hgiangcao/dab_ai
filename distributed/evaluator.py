@@ -40,7 +40,7 @@ def _worker_play_single(worker_args):
     candidate_path, opp_identifier, p1_starts = worker_args
     import copy
     
-    game = DotsAndBoxesGame(size=5, early_stopping=True)
+    game = DotsAndBoxesGame(size=5, starting_player=1, early_stopping=True)
     
     # 1. Candidate Model
     cand_net = NNetWrapper(game, eval_args)
@@ -148,21 +148,33 @@ def evaluate_model(candidate_model_path, best_model_path, num_games):
     
     print(f"Evaluating candidate model over {num_games} arena games using {num_workers} processes...")
     
+    win_threshold = int(num_games * config.PROMOTION_THRESHOLD)
+    loss_threshold = num_games - win_threshold
+    
+    completed_games = 0
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers, mp_context=mp_context) as executor:
         futures = [executor.submit(_worker_play_single, arg) for arg in worker_args_list]
         for future in tqdm(concurrent.futures.as_completed(futures), total=num_games, desc="Arena Eval"):
             try:
                 res, depth = future.result()
                 total_depth += depth
+                completed_games += 1
                 if res == 1:
                     wins += 1
                 elif res == -1:
                     losses += 1
                 else:
                     draws += 1
+                    
+                if wins > win_threshold or losses > loss_threshold:
+                    print(f"\nEarly stopping evaluation! Wins: {wins}, Losses: {losses} (Threshold: {win_threshold})")
+                    for f in futures:
+                        f.cancel()
+                    break
             except Exception as e:
                 print(f"Match execution failed: {e}")
-    avg_depth = total_depth / num_games if num_games > 0 else 0             
+                
+    avg_depth = total_depth / completed_games if completed_games > 0 else 0             
     total_decisive = wins + losses
     win_rate = wins / total_decisive if total_decisive > 0 else 0.5
     
@@ -256,30 +268,32 @@ def evaluate_new_model(iteration=None):
         print(f"No candidate model found at {candidate_path} for evaluation.")
         return False, 0.0, {}, 0
         
-    print(f"Evaluating candidate model: {candidate_path}")
-        
-    print(f"\n================ EVALUATION VS BEST ({config.EVAL_GAMES} games) ================")
-    result = evaluate_model(candidate_path, best_path, config.EVAL_GAMES)
-    
-    print(f" Wins:   {result['wins']}")
-    print(f" Losses: {result['loss']}")
-    print(f" Draws:  {result['draw']}")
-    print(f" Win Rate: {result['win_rate']:.2%}")
-    print("================================================================")
-    
     baseline_win_rates = {}
     if iteration is None or iteration % 5 == 0:
+        print(f"\n================ EVALUATION VS BEST ({config.EVAL_GAMES} games) ================")
+        result = evaluate_model(candidate_path, best_path, config.EVAL_GAMES)
+        
+        print(f" Wins:   {result['wins']}")
+        print(f" Losses: {result['loss']}")
+        print(f" Draws:  {result['draw']}")
+        print(f" Win Rate: {result['win_rate']:.2%}")
+        print("================================================================")
+        
         print(f"\n================ EVALUATION VS BASELINES =======================")
         baseline_win_rates = evaluate_baselines(candidate_path, num_games=10)
         print("================================================================")
-    
-    if should_promote(result):
-        print(f"Result exceeds threshold ({config.PROMOTION_THRESHOLD:.2%}). Model promoted to BEST.")
-        model_manager.promote_best_model()
-        return True, result['win_rate'], baseline_win_rates, result.get('avg_depth', 0)
+        
+        if should_promote(result):
+            print(f"Result exceeds threshold ({config.PROMOTION_THRESHOLD:.2%}). Model promoted to BEST.")
+            model_manager.promote_best_model()
+            return True, result['win_rate'], baseline_win_rates, result['avg_depth']
+        else:
+            print("Model did not exceed threshold. Rejected.")
+            return False, result['win_rate'], baseline_win_rates, result['avg_depth']
+            
     else:
-        print("Model rejected.")
-        return False, result['win_rate'], baseline_win_rates, result.get('avg_depth', 0)
+        print(f"Skipping evaluation (Iteration {iteration}). Evaluation occurs every 5 iterations.")
+        return False, None, {}, 0.0
 
 if __name__ == "__main__":
     evaluate_new_model()

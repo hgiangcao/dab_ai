@@ -252,8 +252,9 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     promoted_model, win_rate, baseline_win_rates, avg_depth = evaluator.evaluate_new_model(iteration)
     
     if writer:
-        writer.add_scalar('Evaluation/Win_Rate_Vs_Old', win_rate, iteration)
-        writer.add_scalar('Evaluation/MCTS_Avg_Depth', avg_depth, iteration)
+        if win_rate is not None:
+            writer.add_scalar('Evaluation/Win_Rate_Vs_Old', win_rate, iteration)
+            writer.add_scalar('Evaluation/MCTS_Avg_Depth', avg_depth, iteration)
         for opp_name, rate in baseline_win_rates.items():
             writer.add_scalar(f'Evaluation/Win_Rate_Vs_{opp_name}', rate, iteration)
         writer.flush()
