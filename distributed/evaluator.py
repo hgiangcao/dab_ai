@@ -269,7 +269,7 @@ def evaluate_new_model(iteration=None):
         return False, 0.0, {}, 0
         
     baseline_win_rates = {}
-    if iteration is None or iteration % 5 == 0:
+    if iteration is None or iteration % 2 == 0:
         print(f"\n================ EVALUATION VS BEST ({config.EVAL_GAMES} games) ================")
         result = evaluate_model(candidate_path, best_path, config.EVAL_GAMES)
         
@@ -279,9 +279,10 @@ def evaluate_new_model(iteration=None):
         print(f" Win Rate: {result['win_rate']:.2%}")
         print("================================================================")
         
-        print(f"\n================ EVALUATION VS BASELINES =======================")
-        baseline_win_rates = evaluate_baselines(candidate_path, num_games=10)
-        print("================================================================")
+        if iteration is None or iteration % 10 == 0:
+            print(f"\n================ EVALUATION VS BASELINES =======================")
+            baseline_win_rates = evaluate_baselines(candidate_path, num_games=10)
+            print("================================================================")
         
         if should_promote(result):
             print(f"Result exceeds threshold ({config.PROMOTION_THRESHOLD:.2%}). Model promoted to BEST.")
@@ -292,7 +293,7 @@ def evaluate_new_model(iteration=None):
             return False, result['win_rate'], baseline_win_rates, result['avg_depth']
             
     else:
-        print(f"Skipping evaluation (Iteration {iteration}). Evaluation occurs every 5 iterations.")
+        print(f"Skipping evaluation (Iteration {iteration}). Evaluation occurs every 2 iterations.")
         return False, None, {}, 0.0
 
 if __name__ == "__main__":
