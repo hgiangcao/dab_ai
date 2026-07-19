@@ -513,9 +513,8 @@ class AlphaZeroTrainer:
             self.writer.add_scalar('Log/Game_Length', avg_length, i)
             self.writer.add_scalar('Log/Average_Tree_Depth', avg_depth, i)
             
-            # 2. Augment Data & Add to Memory
-            augmented_data = self.augment_data(iteration_data)
-            flat_data = [example for game in augmented_data for example in game]
+            # 2. Add Data to Memory
+            flat_data = [example for game in iteration_data for example in game]
             self.memory.extend(flat_data)
             
             self.writer.add_scalar('Log/Memory_Size', len(self.memory), i)
@@ -621,41 +620,3 @@ class AlphaZeroTrainer:
             print("\\nSaving Checkpoint...")
             self.nnet.save_checkpoint(folder=self.args.checkpoint_dir, filename=f'checkpoint_{i}.pth.tar')
             self.writer.flush()
-
-    @staticmethod
-    def augment_data(train_examples_per_game: list):
-        data_augmented = []
-        from game import DotsAndBoxesGame
-        for train_examples in train_examples_per_game:
-            train_examples_augmented = []
-            for lines, boxes, p, v in train_examples:
-                train_examples_augmented.extend(zip(
-                    DotsAndBoxesGame.get_rotations_and_reflections_lines(lines),
-                    DotsAndBoxesGame.get_rotations_and_reflections_boxes(boxes),
-                    DotsAndBoxesGame.get_rotations_and_reflections_lines(np.asarray(p)),
-                    [v] * 8
-                ))
-            
-            formatted_augmented = []
-            for aug_lines, aug_boxes, aug_p, aug_v in train_examples_augmented:
-                h, v_mat = DotsAndBoxesGame.l_to_h_v(aug_lines)
-                size = DotsAndBoxesGame.n_lines_to_size(len(aug_lines))
-                
-                c1 = np.zeros((size+1, size+1))
-                c1[:size+1, :size] = h
-                
-                c2 = np.zeros((size+1, size+1))
-                c2[:size, :size+1] = v_mat
-                
-                c3 = np.zeros((size+1, size+1))
-                c3[:size, :size] = (aug_boxes == 1).astype(float)
-                
-                c4 = np.zeros((size+1, size+1))
-                c4[:size, :size] = (aug_boxes == -1).astype(float)
-                
-                board_state = np.stack([c1, c2, c3, c4])
-                formatted_augmented.append((board_state, aug_p, aug_v))
-                
-            data_augmented.append(formatted_augmented)
-
-        return data_augmented

@@ -123,15 +123,32 @@ class NNetWrapper:
     def train(self, examples, epochs=None):
         """
         Trains the neural network using self-play generated examples.
-        examples: list of (board_state, pi, v)
+        examples: list of raw (lines, boxes, pi, v)
         Returns: tuple of average (pi_loss, v_loss, total_loss)
         """
-        print(f'Training on {len(examples)} samples on device: {self.device}')
+        print(f'Training on {len(examples)} raw samples on device: {self.device}')
         self.nnet.train()
 
         batch_size = self.args.batch_size
         if epochs is None:
             epochs = self.args.epochs
+
+        from dataset import DotsAndBoxesDataset
+        from torch.utils.data import DataLoader
+        import multiprocessing
+
+        num_workers = max(1, multiprocessing.cpu_count() - 2)
+        dataset = DotsAndBoxesDataset(examples)
+        
+        # DataLoader handles shuffling, batching, and multiprocessing on-the-fly augmentation
+        dataloader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=True,
+            drop_last=True
+        )
 
         total_pi_loss = 0.0
         total_v_loss = 0.0
@@ -139,7 +156,7 @@ class NNetWrapper:
 
         for epoch in range(epochs):
             print(f'Epoch {epoch+1}/{epochs}')
-            pi_l, v_l, t_l = self._train_epoch(examples, batch_size)
+            pi_l, v_l, t_l = self._train_epoch(dataloader)
             total_pi_loss += pi_l
             total_v_loss += v_l
             total_loss_all += t_l
@@ -150,28 +167,21 @@ class NNetWrapper:
         print(f"LR after scheduler step: {current_lr:.2e}")
         return total_pi_loss / epochs, total_v_loss / epochs, total_loss_all / epochs
 
-    def _train_epoch(self, examples, batch_size):
-        np.random.shuffle(examples)
-        
-        # tqdm progress bar
-        batch_count = int(len(examples) / batch_size)
-        if batch_count == 0:
+    def _train_epoch(self, dataloader):
+        if len(dataloader) == 0:
             return 0.0, 0.0, 0.0
             
-        t = tqdm(range(batch_count), desc='Training Network')
+        t = tqdm(dataloader, desc='Training Network')
         
         pi_losses = []
         v_losses = []
         total_losses = []
 
-        for i in t:
-            sample_ids = np.random.randint(len(examples), size=batch_size)
-            boards, pis, vs = list(zip(*[examples[i] for i in sample_ids]))
-            
-            # Format inputs. Ensure shape matches the expected Conv2d input (batch, channels, x, y)
-            boards = torch.FloatTensor(np.array(boards).astype(np.float64)).to(self.device)
-            target_pis = torch.FloatTensor(np.array(pis)).to(self.device)
-            target_vs = torch.FloatTensor(np.array(vs).astype(np.float64)).to(self.device)
+        for boards, target_pis, target_vs in t:
+            # Transfer directly to device using non_blocking for speed
+            boards = boards.to(self.device, non_blocking=True)
+            target_pis = target_pis.to(self.device, non_blocking=True)
+            target_vs = target_vs.to(self.device, non_blocking=True)
 
             # predict
             out_pi, out_v = self.nnet(boards)

@@ -32,40 +32,6 @@ train_args = dotdict({
     'device': 'cuda' if torch.cuda.is_available() else 'cpu'
 })
 
-def augment_data(train_examples):
-    """
-    Apply symmetry augmentation and format the data to the 4-channel representation.
-    Extracts identical logic from coach.py AlphaZeroTrainer.augment_data
-    """
-    data_augmented = []
-    # train_examples is a list of (lines, boxes, p, v)
-    for lines, boxes, p, v in train_examples:
-        for aug_lines, aug_boxes, aug_p, aug_v in zip(
-            DotsAndBoxesGame.get_rotations_and_reflections_lines(lines),
-            DotsAndBoxesGame.get_rotations_and_reflections_boxes(boxes),
-            DotsAndBoxesGame.get_rotations_and_reflections_lines(np.asarray(p)),
-            [v] * 8
-        ):
-            h, v_mat = DotsAndBoxesGame.l_to_h_v(aug_lines)
-            size = DotsAndBoxesGame.n_lines_to_size(len(aug_lines))
-            
-            c1 = np.zeros((size+1, size+1))
-            c1[:size+1, :size] = h
-            
-            c2 = np.zeros((size+1, size+1))
-            c2[:size, :size+1] = v_mat
-            
-            c3 = np.zeros((size+1, size+1))
-            c3[:size, :size] = (aug_boxes == 1).astype(float)
-            
-            c4 = np.zeros((size+1, size+1))
-            c4[:size, :size] = (aug_boxes == -1).astype(float)
-            
-            board_state = np.stack([c1, c2, c3, c4])
-            data_augmented.append((board_state, aug_p, aug_v))
-            
-    return data_augmented
-
 def train_network(replay_data, output_model_path, nnet, epochs=None):
     """
     Train AlphaZero network.
@@ -77,11 +43,8 @@ def train_network(replay_data, output_model_path, nnet, epochs=None):
         epochs: number of epochs to train
     """
         
-    print(f"Augmenting dataset of {len(replay_data)} raw states...")
-    augmented_memory = augment_data(replay_data)
-    
-    print(f"Training on {len(augmented_memory)} samples...")
-    pi_loss, v_loss, total_loss = nnet.train(augmented_memory, epochs=epochs)
+    print(f"Training on {len(replay_data)} raw samples (augmenting on-the-fly)...")
+    pi_loss, v_loss, total_loss = nnet.train(replay_data, epochs=epochs)
     
     print(f"Training complete. Loss -> Policy: {pi_loss:.4f} | Value: {v_loss:.4f} | Total: {total_loss:.4f}")
     
