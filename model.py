@@ -8,7 +8,10 @@ import torch.optim as optim
 from tqdm import tqdm
 class dotdict(dict):
     def __getattr__(self, name):
-        return self[name]
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
 
 # ==============================================================================
 # 1. PyTorch Neural Network Architecture (nn.Module)
