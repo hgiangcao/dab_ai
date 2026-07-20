@@ -49,9 +49,19 @@ def _worker_play_single(worker_args):
     cand_net.nnet.eval()
     mcts_cand = MCTS(cand_net, eval_args)
     
+    # Helper to get diverse MCTS actions
+    def get_eval_action(mcts_instance, g):
+        move_number = np.count_nonzero(g.l)
+        # Use temp=1.0 for first 4 moves to force game diversity, then deterministic max play
+        t = 1.0 if move_number < 4 else 0.0
+        pi = mcts_instance.play(g, temp=t)
+        if t > 0:
+            return np.random.choice(len(pi), p=pi)
+        else:
+            return np.argmax(pi)
+            
     def agent_cand(g):
-        pi = mcts_cand.play(g, temp=0)
-        return np.argmax(pi)
+        return get_eval_action(mcts_cand, g)
         
     # 2. Opponent (Best Model or Baseline)
     if opp_identifier == "random":
@@ -89,8 +99,7 @@ def _worker_play_single(worker_args):
             mcts_best = MCTS(best_net, eval_args)
             
             def agent_opp(g):
-                pi = mcts_best.play(g, temp=0)
-                return np.argmax(pi)
+                return get_eval_action(mcts_best, g)
         else:
             import random
             def agent_opp(g):
