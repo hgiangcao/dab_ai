@@ -137,7 +137,9 @@ class NNetWrapper:
         from torch.utils.data import DataLoader
         import multiprocessing
 
-        num_workers = max(1, multiprocessing.cpu_count() - 2)
+        # Set num_workers=0 to prevent PyTorch from overflowing /dev/shm (shared memory)
+        # and to avoid massive multiprocessing memory overhead on cheap VPS machines.
+        num_workers = 0
         dataset = DotsAndBoxesDataset(examples)
         
         # DataLoader handles shuffling, batching, and multiprocessing on-the-fly augmentation
