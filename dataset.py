@@ -8,11 +8,19 @@ class DotsAndBoxesDataset(Dataset):
         """
         raw_examples: A list of tuples (lines, boxes, pi, v)
         """
-        self.examples = raw_examples
+        # Convert Python lists to contiguous numpy arrays to prevent massive RAM overhead
+        # and Pickling crashes when DataLoader spawns multiprocessing workers.
+        lines_list, boxes_list, pi_list, v_list = zip(*raw_examples)
+        
+        self.lines = np.array(lines_list, dtype=np.float32)
+        self.boxes = np.array(boxes_list, dtype=np.float32)
+        self.pis = np.array(pi_list, dtype=np.float32)
+        self.vs = np.array(v_list, dtype=np.float32)
+        self.length = len(raw_examples)
 
     def __len__(self):
         # We multiply the apparent length by 8 to simulate the augmented dataset perfectly.
-        return len(self.examples) * 8
+        return self.length * 8
 
     def __getitem__(self, idx):
         # base_idx determines which raw game state we are augmenting
@@ -20,7 +28,10 @@ class DotsAndBoxesDataset(Dataset):
         # sym_idx determines which symmetry (0-7) to apply
         sym_idx = idx % 8
 
-        lines, boxes, pi, v = self.examples[base_idx]
+        lines = self.lines[base_idx]
+        boxes = self.boxes[base_idx]
+        pi = self.pis[base_idx]
+        v = self.vs[base_idx]
 
         h, v_mat = DotsAndBoxesGame.l_to_h_v(lines)
         aug_p_h, aug_p_v = DotsAndBoxesGame.l_to_h_v(np.asarray(pi))
@@ -60,5 +71,5 @@ class DotsAndBoxesDataset(Dataset):
         return (
             torch.FloatTensor(board_state),
             torch.FloatTensor(aug_p.astype(np.float32)),
-            torch.FloatTensor([float(v)])
+            torch.tensor(float(v), dtype=torch.float32)
         )
