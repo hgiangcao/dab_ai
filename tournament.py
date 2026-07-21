@@ -71,6 +71,9 @@ def create_agent(name: str, size: int):
     elif name == "Greedy Chain":
         from bots.greedy_improve import GreedyChainPlayer
         return GreedyChainPlayer(name=name)
+    elif name == "UCLABot":
+        from bots.ucla_bot import UCLABot
+        return UCLABot(name=name)
     else:
         raise ValueError(f"Unknown agent name: {name}")
 
@@ -155,6 +158,7 @@ def main():
         "Alpha-Beta v2 (0.5s)",
         "MCTS (0.1s)", 
         "MCTS (0.5s)",
+        "UCLABot"
     ]
     n_agents = len(agent_names)
     

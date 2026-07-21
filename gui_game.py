@@ -6,6 +6,7 @@ from agent_interface import HumanAgent, BaseAgent
 from bots.alpha_beta import AlphaBetaPlayer
 from bots.mcts_heuristic import MCTSHeuristicAgent
 from bots.mcts_x import MCTS100Agent, MCTS1000Agent
+from bots.ucla_bot import UCLABot
 import random
 
 
@@ -34,7 +35,8 @@ class DotsAndBoxesGUI:
             "Random Bot": RandomBot,
             "Alpha-Beta Bot": AlphaBetaPlayer,
             "MCTS_100": MCTS100Agent,
-            "MCTS_1000": MCTS1000Agent
+            "MCTS_1000": MCTS1000Agent,
+            "UCLABot": UCLABot
         }
         
         # Active Player Instances

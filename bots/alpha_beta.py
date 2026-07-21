@@ -29,34 +29,16 @@ class AlphaBetaPlayer(BaseAgent):
         self.zobrist = None
 
     def get_move(self, s: DotsAndBoxesGame) -> int:
-        valid_moves = s.get_valid_moves()
-        
-        if len(valid_moves) > self.endgame_threshold:
-            # 1. Greedy Capture: return an immediate 3-line box capture
-            for r in range(s.SIZE):
-                for c in range(s.SIZE):
-                    if s.b[r][c] == 0:
-                        lines = s.get_lines_of_box((r, c))
-                        if sum(1 for ln in lines if s.l[ln] != 0) == 3:
-                            return [ln for ln in lines if s.l[ln] == 0][0]
-            
-            # 2. Random Safe Move: move that doesn't create a 3-line box
-            random.shuffle(valid_moves)
-            for move in valid_moves:
-                safe = True
-                for box in s.get_boxes_of_line(move):
-                    lines = s.get_lines_of_box(box)
-                    if sum(1 for ln in lines if s.l[ln] != 0) == 2:
-                        safe = False
-                        break
-                if safe:
-                    return move
-                    
-            # 3. Fallback
-            return valid_moves[0]
-            
-        else:
-            return self._iterative_deepening(s)
+        # 1. Immediate Greedy Capture (saves search time)
+        for r in range(s.SIZE):
+            for c in range(s.SIZE):
+                if s.b[r][c] == 0:
+                    lines = s.get_lines_of_box((r, c))
+                    if sum(1 for ln in lines if s.l[ln] != 0) == 3:
+                        return [ln for ln in lines if s.l[ln] == 0][0]
+                        
+        # 2. Always run Alpha-Beta. The time limit prevents timeout.
+        return self._iterative_deepening(s)
 
     def _iterative_deepening(self, s_node: DotsAndBoxesGame) -> int:
         valid_moves = s_node.get_valid_moves()
