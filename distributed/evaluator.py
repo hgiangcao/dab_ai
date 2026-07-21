@@ -49,19 +49,9 @@ def _worker_play_single(worker_args):
     cand_net.nnet.eval()
     mcts_cand = MCTS(cand_net, eval_args)
     
-    # Helper to get diverse MCTS actions
-    def get_eval_action(mcts_instance, g):
-        move_number = np.count_nonzero(g.l)
-        # Use temp=1.0 for first 4 moves to force game diversity, then deterministic max play
-        t = 1.0 if move_number < 4 else 0.0
-        pi = mcts_instance.play(g, temp=t)
-        if t > 0:
-            return np.random.choice(len(pi), p=pi)
-        else:
-            return np.argmax(pi)
-            
     def agent_cand(g):
-        return get_eval_action(mcts_cand, g)
+        pi = mcts_cand.play(g, temp=0)
+        return np.argmax(pi)
         
     # 2. Opponent (Best Model or Baseline)
     if opp_identifier == "random":
@@ -99,7 +89,8 @@ def _worker_play_single(worker_args):
             mcts_best = MCTS(best_net, eval_args)
             
             def agent_opp(g):
-                return get_eval_action(mcts_best, g)
+                pi = mcts_best.play(g, temp=0)
+                return np.argmax(pi)
         else:
             import random
             def agent_opp(g):
@@ -135,70 +126,6 @@ def play_game(model1_path, model2_path, p1_starts=True):
     """
     return _worker_play_single((model1_path, model2_path, p1_starts))
 
-
-def evaluate_model_pool(candidate_model_path, num_games, current_phase):
-    """
-    Run evaluation games in parallel against a curriculum pool of bots.
-    """
-    wins = 0
-    losses = 0
-    draws = 0
-    
-    phases_config = [
-        [("random", 0.01)],
-        [("alpha_beta_0.1s", 0.05)],
-        [("greedy", 0.05)],
-        [("mcts_0.1s", 0.05)],
-        [("greedy_chain", 0.05)]
-    ]
-    
-    current_pool = []
-    for phase_idx in range(min(current_phase + 1, len(phases_config))):
-        current_pool.extend(phases_config[phase_idx])
-        
-    total_prob = sum(prob for _, prob in current_pool)
-    normalized_pool = [(opp, prob / total_prob) for opp, prob in current_pool]
-    opp_types, opp_probs = zip(*normalized_pool)
-    
-    worker_args_list = []
-    total_depth = 0.0
-    half_games = num_games // 2
-    for idx in range(num_games):
-        p1_starts = idx < half_games
-        opp_type = np.random.choice(opp_types, p=opp_probs)
-        worker_args_list.append((candidate_model_path, opp_type, p1_starts))
-        
-    mp_context = multiprocessing.get_context('spawn')
-    num_workers = max(1, multiprocessing.cpu_count() - 1)
-    
-    completed_games = 0
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers, mp_context=mp_context) as executor:
-        futures = [executor.submit(_worker_play_single, arg) for arg in worker_args_list]
-        for future in tqdm(concurrent.futures.as_completed(futures), total=num_games, desc="Arena Eval"):
-            try:
-                res, depth = future.result()
-                total_depth += depth
-                completed_games += 1
-                if res == 1:
-                    wins += 1
-                elif res == -1:
-                    losses += 1
-                else:
-                    draws += 1
-            except Exception as e:
-                print(f"Match execution failed: {e}")
-                
-    avg_depth = total_depth / completed_games if completed_games > 0 else 0             
-    total_decisive = wins + losses
-    win_rate = wins / total_decisive if total_decisive > 0 else 0.5
-    
-    return {
-        "wins": wins,
-        "loss": losses,
-        "draw": draws,
-        "win_rate": win_rate,
-        "avg_depth": avg_depth
-    }
 
 def evaluate_model(candidate_model_path, best_model_path, num_games):
     """
@@ -343,17 +270,9 @@ def evaluate_new_model(iteration=None):
         
     baseline_win_rates = {}
     if iteration is None or iteration % 2 == 0:
-        current_phase = model_manager.get_current_phase()
+        print(f"\n================ EVALUATION VS BEST ({config.EVAL_GAMES} games) ================")
+        result = evaluate_model(candidate_path, best_path, config.EVAL_GAMES)
         
-        if current_phase < 5:
-            threshold = 0.60
-            print(f"\n================ EVALUATION VS PHASE OPPONENTS ({config.EVAL_GAMES} games, Phase {current_phase}) ================")
-            result = evaluate_model_pool(candidate_path, config.EVAL_GAMES, current_phase)
-        else:
-            threshold = 0.55
-            print(f"\n================ EVALUATION VS BEST ({config.EVAL_GAMES} games, Phase {current_phase}) ================")
-            result = evaluate_model(candidate_path, best_path, config.EVAL_GAMES)
-            
         print(f" Wins:   {result['wins']}")
         print(f" Losses: {result['loss']}")
         print(f" Draws:  {result['draw']}")
@@ -365,12 +284,12 @@ def evaluate_new_model(iteration=None):
             baseline_win_rates = evaluate_baselines(candidate_path, num_games=10)
             print("================================================================")
         
-        if result['win_rate'] >= threshold:
-            print(f"Result exceeds threshold ({threshold:.2%}). Model promoted to BEST.")
+        if should_promote(result):
+            print(f"Result exceeds threshold ({config.PROMOTION_THRESHOLD:.2%}). Model promoted to BEST.")
             model_manager.promote_best_model()
             return True, result['win_rate'], baseline_win_rates, result['avg_depth']
         else:
-            print(f"Model did not exceed threshold ({threshold:.2%}). Rejected.")
+            print("Model did not exceed threshold. Rejected.")
             return False, result['win_rate'], baseline_win_rates, result['avg_depth']
             
     else:
