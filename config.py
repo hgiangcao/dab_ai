@@ -41,7 +41,7 @@ LEARNING_RATE = 0.0005
 MAX_WORKERS = 8
 
 # Replay buffer defaults
-MAX_REPLAY_SIZE = 30000
+MAX_REPLAY_SIZE = 20000
 MIN_REPLAY_SIZE = 2000
 
 # Evaluation defaults

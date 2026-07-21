@@ -158,10 +158,10 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
             for opp, stats in aggregated_bot_stats.items():
                 if total_games_all_bots > 0:
                     pct = stats['games'] / total_games_all_bots
-                    writer.add_scalar(f'Curriculum_Bots/{opp}_Percentage', pct, iteration)
+                    writer.add_scalar(f'Curriculum_Bots_count/{opp}_Percentage', pct, iteration)
                 if stats['decisive'] > 0:
                     wr = stats['wins'] / stats['decisive']
-                    writer.add_scalar(f'Curriculum_Bots/{opp}_WinRate', wr, iteration)
+                    writer.add_scalar(f'Curriculum_Bots_Winrate/{opp}_WinRate', wr, iteration)
             
         # Advance phase only when the model is genuinely winning, 
         # with a backstop of 20 iterations so training never stalls forever.
