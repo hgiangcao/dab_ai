@@ -89,6 +89,21 @@ def _worker_play_single(worker_args):
         baseline = GreedyChainPlayer(name="GreedyChain")
         def agent_opp(g):
             return baseline.get_move(copy.deepcopy(g))
+    elif opp_identifier == "ucla_bot_v3":
+        from bots.ucla_bot import UCLABot_v3
+        baseline = UCLABot_v3(name="UCLABot_v3")
+        def agent_opp(g):
+            return baseline.get_move(copy.deepcopy(g))
+    elif opp_identifier == "simple_bot":
+        from bots.simple_bot import SimpleBot
+        baseline = SimpleBot(name="SimpleBot")
+        def agent_opp(g):
+            return baseline.get_move(copy.deepcopy(g))
+    elif opp_identifier == "simple_bot_v2":
+        from bots.simple_bot_v2 import SimpleBotV2
+        baseline = SimpleBotV2(name="SimpleBotV2")
+        def agent_opp(g):
+            return baseline.get_move(copy.deepcopy(g))
     else:
         # opp_identifier is best_path
         if os.path.exists(opp_identifier):
@@ -211,11 +226,11 @@ def evaluate_baselines(candidate_model_path, num_games=10):
     Run evaluation games against heuristic baselines.
     """
     baselines = {
-        "random": "Random",
-        "alpha_beta_0.1s": "AlphaBeta_0.1s",
-        "mcts_0.1s": "MCTS_0.1s",
         "greedy": "Greedy",
-        "greedy_chain": "GreedyChain"
+        "greedy_chain": "GreedyChain",
+        "ucla_bot_v3": "UCLABot_v3",
+        "simple_bot": "SimpleBot",
+        "simple_bot_v2": "SimpleBotV2"
     }
     
     baseline_win_rates = {}

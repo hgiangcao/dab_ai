@@ -76,12 +76,12 @@ class SelfPlayGenerator:
 
         # 2. Determine opponent pool based on phase (matching coach.py configuration)
         phases_config = [
-            [("random", 0.01)],
-            [("greedy", 0.1)],
-            [("alpha_beta_0.1s", 0.1)],
-            [("mcts_0.1s", 0.1)],
-            [("greedy_chain", 0.1)],
-            [("self", 0.4), ("best", 0.1), ("past", 0.1)]
+            [("greedy", 0.05)],
+            [("greedy_chain", 0.05)],
+            [("simple_bot", 0.05)],
+            [("simple_bot_v2", 0.05)],
+            [("ucla_bot_v3", 0.05)],
+            [("self", 0.5), ("best", 0.1), ("past", 0.15)]
         ]
         
         current_pool = []

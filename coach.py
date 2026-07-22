@@ -214,6 +214,36 @@ def worker_execute_episode_chunk(worker_args):
                 pi[move] = 1.0
                 return pi, 0
 
+        elif opp_type == "ucla_bot_v3":
+            from bots.ucla_bot import UCLABot_v3
+            baseline = UCLABot_v3(name="UCLABot_v3")
+
+            def agent_opp(g, t):
+                move = baseline.get_move(copy.deepcopy(g))
+                pi = np.zeros(g.N_LINES, dtype=np.float32)
+                pi[move] = 1.0
+                return pi, 0
+
+        elif opp_type == "simple_bot":
+            from bots.simple_bot import SimpleBot
+            baseline = SimpleBot(name="SimpleBot")
+
+            def agent_opp(g, t):
+                move = baseline.get_move(copy.deepcopy(g))
+                pi = np.zeros(g.N_LINES, dtype=np.float32)
+                pi[move] = 1.0
+                return pi, 0
+
+        elif opp_type == "simple_bot_v2":
+            from bots.simple_bot_v2 import SimpleBotV2
+            baseline = SimpleBotV2(name="SimpleBotV2")
+
+            def agent_opp(g, t):
+                move = baseline.get_move(copy.deepcopy(g))
+                pi = np.zeros(g.N_LINES, dtype=np.float32)
+                pi[move] = 1.0
+                return pi, 0
+
         else:
             raise ValueError(f"Unknown opponent type: {opp_type}")
 
@@ -329,6 +359,21 @@ def worker_play_single(worker_args):
         baseline = GreedyChainPlayer(name="GreedyChain")
         def agent2(g):
             return baseline.get_move(copy.deepcopy(g))
+    elif opponent_type == "ucla_bot_v3":
+        from bots.ucla_bot import UCLABot_v3
+        baseline = UCLABot_v3(name="UCLABot_v3")
+        def agent2(g):
+            return baseline.get_move(copy.deepcopy(g))
+    elif opponent_type == "simple_bot":
+        from bots.simple_bot import SimpleBot
+        baseline = SimpleBot(name="SimpleBot")
+        def agent2(g):
+            return baseline.get_move(copy.deepcopy(g))
+    elif opponent_type == "simple_bot_v2":
+        from bots.simple_bot_v2 import SimpleBotV2
+        baseline = SimpleBotV2(name="SimpleBotV2")
+        def agent2(g):
+            return baseline.get_move(copy.deepcopy(g))
     else: # "pnet"
         pnet = NNetWrapper(dummy_game, args)
         pbuffer = io.BytesIO(pnet_bytes)
@@ -432,14 +477,14 @@ class AlphaZeroTrainer:
             episode_specs = []
             
             phases_config = [
-                [("random", 0.01)],
-                [("greedy", 0.1)],
-                [("alpha_beta_0.1s", 0.1)],
-                [("mcts_0.1s", 0.1)],
-                [("greedy_chain", 0.1)],
-                [("self", 0.4), ("best", 0.1), ("past", 0.1)]
+                [("greedy", 0.05)],
+                [("greedy_chain", 0.05)],
+                [("simple_bot", 0.05)],
+                [("simple_bot_v2", 0.05)],
+                [("ucla_bot_v3", 0.05)],
+                [("self", 0.5), ("best", 0.1), ("past", 0.15)]
             ]
-            
+                
             current_pool = []
             for phase_idx in range(self.current_phase + 1):
                 current_pool.extend(phases_config[phase_idx])
@@ -586,11 +631,11 @@ class AlphaZeroTrainer:
                 
             # b. Play against Evaluators
             eval_opponents = {
-                "random": "Random",
-                "alpha_beta_0.1s": "AlphaBeta_0.1s",
-                "mcts_0.1s": "MCTS_0.1s",
                 "greedy": "Greedy",
-                "greedy_chain": "GreedyChain"
+                "greedy_chain": "GreedyChain",
+                "ucla_bot_v3": "UCLABot_v3",
+                "simple_bot": "SimpleBot",
+                "simple_bot_v2": "SimpleBotV2"
             }
             
             for opp_type, opp_name in eval_opponents.items():

@@ -42,7 +42,7 @@ class RandomAgent(BaseAgent):
 _nnet_cache = {}
 
 class AlphaZeroAgent(BaseAgent):
-    def __init__(self, name: str = "AlphaZero", n_simulations=500, model_path="best.pth.tar"):
+    def __init__(self, name: str = "AlphaZero", n_simulations=200, model_path="best.pth.tar"):
         super().__init__(name)
         import torch
         import config
@@ -115,6 +115,9 @@ def create_agent(name: str, size: int, model_path: str = "best.pth.tar"):
         return UCLAMCTS(name=name, n_simulations=200, time_limit=None)
     elif name == "SimpleBot":
         return SimpleBot(name=name)
+    elif name == "SimpleBot_v2":
+        from bots.simple_bot_v2 import SimpleBotV2
+        return SimpleBotV2(name=name)
     else:
         raise ValueError(f"Unknown agent name: {name}")
 
@@ -156,8 +159,8 @@ def main():
         "Greedy", 
         "Greedy Chain",
         "UCLABot_v3",
-        # "UCLA_MCTS_100",
-        "SimpleBot"
+        "SimpleBot",
+        "SimpleBot_v2"
     ]
 
     tasks = []

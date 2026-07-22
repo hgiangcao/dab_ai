@@ -98,6 +98,9 @@ def create_agent(name: str, size: int):
     elif name == "SimpleBot":
         from bots.simple_bot import SimpleBot
         return SimpleBot(name=name)
+    elif name == "SimpleBot_v2":
+        from bots.simple_bot_v2 import SimpleBot_v2
+        return SimpleBot_v2(name=name)
     else:
         raise ValueError(f"Unknown agent name: {name}")
 
@@ -205,9 +208,10 @@ def main():
         "UCLABot_v3",
         # "UCLAGreedyBot",
         # "UCLAAlphaBeta",
-        "UCLA_MCTS_100",
+        # "UCLA_MCTS_100",
         # "UCLA_MCTS_200",
-        "SimpleBot"
+        "SimpleBot",
+        "SimpleBot_v2"
     ]
     n_agents = len(agent_names)
     
