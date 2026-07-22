@@ -186,14 +186,18 @@ class AlphaBetaPlayer(BaseAgent):
         if time.time() > end_time:
             raise TimeoutError()
 
+        my  = _count_captured_boxes(s_node, root_player)
+        opp = _count_captured_boxes(s_node, -root_player)
+
+        if my * 2 > s_node.N_BOXES or opp * 2 > s_node.N_BOXES:
+            return a_latest, (my - opp) * 100000
+
         valid_moves = s_node.get_valid_moves()
 
         # --- Base case ---
         if not valid_moves or depth == 0 or not s_node.is_running():
             if not s_node.is_running():
                 # Terminal: exact score
-                my  = _count_captured_boxes(s_node, root_player)
-                opp = _count_captured_boxes(s_node, -root_player)
                 return a_latest, (my - opp) * 100000
             # Leaf: greedy heuristic from root player's perspective
             score = greedy_evaluate(s_node, root_player)

@@ -140,14 +140,17 @@ class AlphaBetaPlayer(BaseAgent):
         if time.time() > end_time:
             raise TimeoutError()
 
+        player         = s_node.current_player if maximize else -s_node.current_player
+        player_boxes   = int((s_node.b == player).sum())
+        opponent_boxes = int((s_node.b == -player).sum())
+
+        if player_boxes * 2 > s_node.N_BOXES or opponent_boxes * 2 > s_node.N_BOXES:
+            return a_latest, (player_boxes - opponent_boxes) * 10000
+
         valid_moves = s_node.get_valid_moves()
 
         # --- Base case ---
         if not valid_moves or depth == 0 or not s_node.is_running():
-            player         = s_node.current_player if maximize else -s_node.current_player
-            player_boxes   = int((s_node.b == player).sum())
-            opponent_boxes = int((s_node.b == -player).sum())
-
             if not s_node.is_running():
                 return a_latest, (player_boxes - opponent_boxes) * 10000
 

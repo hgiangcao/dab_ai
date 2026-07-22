@@ -1,0 +1,2 @@
+Tournament: Local Bots vs Web Bot (N=20 games each, Sequential)
+============================================================

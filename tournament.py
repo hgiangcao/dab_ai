@@ -32,45 +32,72 @@ class RandomAgent(BaseAgent):
 def create_agent(name: str, size: int):
     if name == "Random":
         return RandomAgent()
-    elif name == "Alpha-Beta (1s)":
-        from bots.alpha_beta import AlphaBetaPlayer
-        return AlphaBetaPlayer(name=name, time_limit=1.0)
-    elif name == "Alpha-Beta v1 (1s)":
-        from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
-        return AlphaBetaPlayerV1(name=name, time_limit=1.0)
-    elif name == "MCTS (1s)":
+    # elif name == "Alpha-Beta (1s)":
+    #     from bots.alpha_beta import AlphaBetaPlayer
+    #     return AlphaBetaPlayer(name=name, time_limit=1.0)
+    # elif name == "Alpha-Beta v1 (1s)":
+    #     from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
+    #     return AlphaBetaPlayerV1(name=name, time_limit=1.0)
+    # elif name == "Alpha-Beta (0.1s)":
+    #     from bots.alpha_beta import AlphaBetaPlayer
+    #     return AlphaBetaPlayer(name=name, time_limit=0.1)
+    # elif name == "Alpha-Beta v1 (0.1s)":
+    #     from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
+    #    return AlphaBetaPlayerV1(name=name, time_limit=0.1)
+    elif name == "MCTS (100sims)":
         from bots.mcts_x import MCTSGAgent
-        return MCTSGAgent(name=name, time_limit=1.0)
-    elif name == "Alpha-Beta (0.1s)":
-        from bots.alpha_beta import AlphaBetaPlayer
-        return AlphaBetaPlayer(name=name, time_limit=0.1)
-    elif name == "Alpha-Beta v1 (0.1s)":
-        from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
-        return AlphaBetaPlayerV1(name=name, time_limit=0.1)
-    elif name == "MCTS (0.1s)":
+        return MCTSGAgent(name=name, n_simulations=100)
+    elif name == "MCTS (200sims)":
         from bots.mcts_x import MCTSGAgent
-        return MCTSGAgent(name=name, time_limit=0.1)
-    elif name == "Alpha-Beta (0.5s)":
-        from bots.alpha_beta import AlphaBetaPlayer
-        return AlphaBetaPlayer(name=name, time_limit=0.5)
-    elif name == "Alpha-Beta v1 (0.5s)":
-        from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
-        return AlphaBetaPlayerV1(name=name, time_limit=0.5)
-    elif name == "Alpha-Beta v2 (0.1s)":
-        from bots.alpha_beta_v2 import AlphaBetaPlayer as AlphaBetaPlayerV2
-        return AlphaBetaPlayerV2(name=name, time_limit=0.1)
-    elif name == "Alpha-Beta v2 (0.5s)":
-        from bots.alpha_beta_v2 import AlphaBetaPlayer as AlphaBetaPlayerV2
-        return AlphaBetaPlayerV2(name=name, time_limit=0.5)
-    elif name == "MCTS (0.5s)":
-        from bots.mcts_x import MCTSGAgent
-        return MCTSGAgent(name=name, time_limit=0.5)
+        return MCTSGAgent(name=name, n_simulations=200)
+    # elif name == "MCTS (1000sims)":
+    #     from bots.mcts_x import MCTSGAgent
+    #     return MCTSGAgent(name=name, n_simulations=1000)
+    # elif name == "MCTS (1s)":
+    #     from bots.mcts_x import MCTSGAgent
+    #     return MCTSGAgent(name=name, time_limit=1.0)
+    # elif name == "Alpha-Beta (0.5s)":
+    #     from bots.alpha_beta import AlphaBetaPlayer
+    #     return AlphaBetaPlayer(name=name, time_limit=0.5)
+    # elif name == "Alpha-Beta v1 (0.5s)":
+    #     from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
+    #     return AlphaBetaPlayerV1(name=name, time_limit=0.5)
+    # elif name == "Alpha-Beta v2 (0.1s)":
+    #     from bots.alpha_beta_v2 import AlphaBetaPlayer as AlphaBetaPlayerV2
+    #     return AlphaBetaPlayerV2(name=name, time_limit=0.1)
+    # elif name == "Alpha-Beta v2 (0.5s)":
+    #     from bots.alpha_beta_v2 import AlphaBetaPlayer as AlphaBetaPlayerV2
+    #     return AlphaBetaPlayerV2(name=name, time_limit=0.5)
     elif name == "Greedy":
         from bots.greedy import GreedyPlayer
         return GreedyPlayer(name=name)
     elif name == "Greedy Chain":
         from bots.greedy_improve import GreedyChainPlayer
         return GreedyChainPlayer(name=name)
+    elif name == "UCLABot":
+        from bots.ucla_bot import UCLABot
+        return UCLABot(name=name)
+    elif name == "UCLABot_v2":
+        from bots.ucla_bot import UCLABot_v2
+        return UCLABot_v2(name=name)
+    elif name == "UCLABot_v3":
+        from bots.ucla_bot import UCLABot_v3
+        return UCLABot_v3(name=name)
+    elif name == "UCLAGreedyBot":
+        from bots.ucla_bot_heuristic import UCLAGreedyBot
+        return UCLAGreedyBot(name=name)
+    elif name == "UCLAAlphaBeta":
+        from bots.ucla_alpha_beta import UCLAAlphaBeta
+        return UCLAAlphaBeta(name=name)
+    elif name == "UCLA_MCTS_100":
+        from bots.ucla_mcts import UCLAMCTS
+        return UCLAMCTS(name=name, n_simulations=100, time_limit=None)
+    elif name == "UCLA_MCTS_200":
+        from bots.ucla_mcts import UCLAMCTS
+        return UCLAMCTS(name=name, n_simulations=200, time_limit=None)
+    elif name == "SimpleBot":
+        from bots.simple_bot import SimpleBot
+        return SimpleBot(name=name)
     else:
         raise ValueError(f"Unknown agent name: {name}")
 
@@ -80,8 +107,6 @@ def run_single_matchup(args):
     
     # Initialize agents inside the worker process
     print()
-    agent1 = create_agent(agent1_name, size)
-    agent2 = create_agent(agent2_name, size)
     
     a1_wins = 0
     a2_wins = 0
@@ -89,6 +114,8 @@ def run_single_matchup(args):
     game_records = []
     
     for i in tqdm(range(num_games), desc=f"Playing {agent1_name} vs {agent2_name}"):
+        agent1 = create_agent(agent1_name, size)
+        agent2 = create_agent(agent2_name, size)
         # Alternate who starts to ensure fairness
         starting_player = 1 if (i % 2 == 0) else -1
         game = DotsAndBoxesGame(size=size, starting_player=starting_player,early_stopping=True)
@@ -160,17 +187,27 @@ def main():
 
     # List of agent names to include in the tournament
     agent_names = [
-        "Random", 
+        # "Random", 
         "Greedy", 
         "Greedy Chain",
-        "Alpha-Beta (0.1s)", 
+        # "Alpha-Beta (0.1s)", 
         # "Alpha-Beta (0.5s)", 
-        "Alpha-Beta v1 (0.1s)",
+        # "Alpha-Beta v1 (0.1s)",
         # "Alpha-Beta v1 (0.5s)",
-        "Alpha-Beta v2 (0.1s)",
+        # "Alpha-Beta v2 (0.1s)",
         # "Alpha-Beta v2 (0.5s)",
-        "MCTS (0.1s)", 
+        # "MCTS (0.1s)", 
         # "MCTS (0.5s)",
+        # "MCTS (100sims)",
+        # "MCTS (200sims)",
+        # "UCLABot",
+        # "UCLABot_v2",
+        "UCLABot_v3",
+        # "UCLAGreedyBot",
+        # "UCLAAlphaBeta",
+        "UCLA_MCTS_100",
+        # "UCLA_MCTS_200",
+        "SimpleBot"
     ]
     n_agents = len(agent_names)
     
@@ -187,8 +224,12 @@ def main():
     
     results = []
     with mp.Pool(num_cores) as pool:
-        for res in tqdm(pool.imap_unordered(run_single_matchup, tasks), total=len(tasks), desc="Running Matchups"):
+        pbar = tqdm(pool.imap_unordered(run_single_matchup, tasks), total=len(tasks), desc="Running Matchups")
+        for res in pbar:
             results.append(res)
+            a1_name, a2_name, a1_wins, a2_wins, draws, _ = res
+            wr = (a1_wins + 0.5 * draws) / args.games
+            pbar.set_postfix_str(f"{a1_name} vs {a2_name}: {wr:.2f}")
             
     # Compile the winrate matrix
     winrate_matrix = np.zeros((n_agents, n_agents))
@@ -209,8 +250,8 @@ def main():
             idx2 = name_to_idx[a2_name]
             
             # Save game records to file
-            for record in game_records:
-                f_log.write(json.dumps(record) + '\n')
+            # for record in game_records:
+            #     f_log.write(json.dumps(record) + '\n')
             
             # Winrate of Agent 1 against Agent 2
             wr1 = (a1_wins + 0.5 * draws) / args.games
