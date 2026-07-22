@@ -228,8 +228,9 @@ def main():
         for res in pbar:
             results.append(res)
             a1_name, a2_name, a1_wins, a2_wins, draws, _ = res
-            wr = (a1_wins + 0.5 * draws) / args.games
-            pbar.set_postfix_str(f"{a1_name} vs {a2_name}: {wr:.2f}")
+            a1_wr = (a1_wins + 0.5 * draws) / args.games
+            a2_wr = (a2_wins + 0.5 * draws) / args.games
+            pbar.set_postfix_str(f"{a1_name} vs {a2_name}: {a1_wr:.1%} vs {a2_wr:.1%} ({a1_wins}W-{a2_wins}L-{draws}D)")
             
     # Compile the winrate matrix
     winrate_matrix = np.zeros((n_agents, n_agents))
