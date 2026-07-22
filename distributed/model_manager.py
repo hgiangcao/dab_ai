@@ -71,7 +71,7 @@ def get_current_phase():
 
 def advance_curriculum_phase():
     current_phase = get_current_phase()
-    new_phase = min(5, current_phase + 1)
+    new_phase = min(len(config.PHASES_CONFIG) - 1, current_phase + 1)
     
     if os.path.exists(config.VERSION_FILE):
         with open(config.VERSION_FILE, "r") as f:

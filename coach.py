@@ -476,19 +476,9 @@ class AlphaZeroTrainer:
             
             episode_specs = []
             
-            phases_config = [
-                [("random", 0.02)],
-                [("greedy", 0.04)],
-                [("greedy_chain", 0.04)],
-                [("simple_bot", 0.05)],
-                [("simple_bot_v2", 0.05)],
-                [("ucla_bot_v3", 0.05)],
-                [("self", 0.5), ("best", 0.1), ("past", 0.15)]
-            ]
-                
             current_pool = []
             for phase_idx in range(self.current_phase + 1):
-                current_pool.extend(phases_config[phase_idx])
+                current_pool.extend(config.PHASES_CONFIG[phase_idx])
                 
             total_prob = sum(p for _, p in current_pool)
             normalized_probs = [p / total_prob for _, p in current_pool]
@@ -545,7 +535,7 @@ class AlphaZeroTrainer:
             print(f"Phase {self.current_phase} Winrate: {phase_winrate:.1%} ({self.phase_wins}/{self.phase_decisive})")
             
             self.iterations_in_current_phase += 1
-            if (phase_winrate >= 0.60 or self.iterations_in_current_phase >= 200) and self.current_phase < 5:
+            if (phase_winrate >= 0.60 or self.iterations_in_current_phase >= 200) and self.current_phase < len(config.PHASES_CONFIG) - 1:
                 reason = "winrate >= 60%" if phase_winrate >= 0.60 else "max iterations reached"
                 print(f"Phase {self.current_phase} cleared ({reason})! Advancing to Phase {self.current_phase + 1}...")
                 self.current_phase += 1

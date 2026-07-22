@@ -90,3 +90,15 @@ MODEL_DOWNLOAD_URL = "/latest_model"
 BEST_MODEL_DOWNLOAD_URL = "/best_model"
 VERSION_API = "/version"
 UPLOAD_REPLAY_API = "/upload_replay"
+
+# Curriculum phases configuration
+PHASES_CONFIG = [
+    [("random", 0.01)],
+    [("greedy", 0.02)],
+    [("greedy_chain", 0.02)],
+    [("simple_bot", 0.04)],
+    [("simple_bot_v2", 0.05)],
+    [("ucla_bot_v3", 0.06)],
+    [("self", 0.6), ("best", 0.1), ("past", 0.15)]
+]
+

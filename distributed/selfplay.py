@@ -17,6 +17,8 @@ from model import dotdict
 from mcts import MCTS
 from coach import build_worker_chunks, worker_execute_episode_chunk, get_selfplay_executor
 
+# Imported from config: config.PHASES_CONFIG
+
 class SelfPlayGenerator:
 
     def __init__(self):
@@ -66,28 +68,18 @@ class SelfPlayGenerator:
                         except Exception:
                             pass
         print(f"SelfPlayGenerator initialized. Loaded {len(self.json_logs)} historical sequences.")
-
+ 
     def load_model(self, checkpoint):
         """Loads the path to the latest model to be used by the multiprocessing workers."""
         self.latest_model_path = os.path.abspath(checkpoint)
-
+ 
     def play_games(self, num_games, save_dir, worker_id="worker", model_version=0, current_phase=0,epoch =0):
         print(f"epoch {epoch} - Starting generation of {num_games} games at Phase {current_phase}...")
-
+ 
         # 2. Determine opponent pool based on phase (matching coach.py configuration)
-        phases_config = [
-            [("random", 0.02)],
-            [("greedy", 0.04)],
-            [("greedy_chain", 0.04)],
-            [("simple_bot", 0.05)],
-            [("simple_bot_v2", 0.05)],
-            [("ucla_bot_v3", 0.05)],
-            [("self", 0.5), ("best", 0.1), ("past", 0.15)]
-        ]
-        
         current_pool = []
-        for phase_idx in range(min(current_phase + 1, len(phases_config))):
-            current_pool.extend(phases_config[phase_idx])
+        for phase_idx in range(min(current_phase + 1, len(config.PHASES_CONFIG))):
+            current_pool.extend(config.PHASES_CONFIG[phase_idx])
             
         total_prob = sum(p for _, p in current_pool)
         normalized_probs = [p / total_prob for _, p in current_pool]
