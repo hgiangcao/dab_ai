@@ -78,11 +78,8 @@ class SelfPlayGenerator:
     def play_games(self, num_games, save_dir, worker_id="worker", model_version=0, current_phase=0,epoch =0):
         print(f"epoch {epoch} - Starting generation of {num_games} games at Phase {current_phase}...")
  
-        # Determine opponent pool: current phase + next phase combined
+        # Determine opponent pool for the current phase
         current_pool = list(config.PHASES_CONFIG[current_phase])
-        next_phase = min(current_phase + 1, len(config.PHASES_CONFIG) - 1)
-        if next_phase != current_phase:
-            current_pool.extend(config.PHASES_CONFIG[next_phase])
             
         total_prob = sum(p for _, p in current_pool)
         normalized_probs = [p / total_prob for _, p in current_pool]

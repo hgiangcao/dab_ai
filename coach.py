@@ -499,9 +499,6 @@ class AlphaZeroTrainer:
             episode_specs = []
             
             current_pool = list(config.PHASES_CONFIG[self.current_phase])
-            next_phase = min(self.current_phase + 1, len(config.PHASES_CONFIG) - 1)
-            if next_phase != self.current_phase:
-                current_pool.extend(config.PHASES_CONFIG[next_phase])
                 
             total_prob = sum(p for _, p in current_pool)
             normalized_probs = [p / total_prob for _, p in current_pool]
@@ -559,7 +556,7 @@ class AlphaZeroTrainer:
             
             self.iterations_in_current_phase += 1
             threshold = config.PHASE_ADVANCE_THRESHOLD.get(self.current_phase, 0.60)
-            if (phase_winrate >= threshold or self.iterations_in_current_phase >= 200) and self.current_phase < len(config.PHASES_CONFIG) - 2:
+            if (phase_winrate >= threshold or self.iterations_in_current_phase >= 200) and self.current_phase < len(config.PHASES_CONFIG) - 1:
                 reason = f"winrate >= {threshold:.0%}" if phase_winrate >= threshold else "max iterations reached"
                 print(f"Phase {self.current_phase} cleared ({reason})! Advancing to Phase {self.current_phase + 1}...")
                 self.current_phase += 1

@@ -93,20 +93,21 @@ UPLOAD_REPLAY_API = "/upload_replay"
 
 # Curriculum phases configuration
 PHASES_CONFIG = [
-    [("random", 0.05)],
-    [("greedy", 0.05)],
-    [("greedy_chain", 0.05)],
-    [("simple_bot", 0.05)],
-    [("simple_bot_v2", 0.1)],
-    [("ucla_bot_v3", 0.1)],
-    [("self", 0.4), ("best", 0.1), ("past", 0.1)]
+    [("random", 0.6),("self", 0.4)],
+    [("random", 0.2),("greedy", 0.4),("self", 0.4)],
+    [("greedy", 0.2),("greedy_chain", 0.4),("self", 0.4)],
+    [("greedy_chain", 0.2),("simple_bot", 0.4),("self", 0.4)],
+    [("simple_bot", 0.2),("simple_bot_v2", 0.4),("self", 0.4)],
+    [("simple_bot_v2", 0.2),("ucla_bot_v3", 0.4),("self", 0.4)],
+    [("ucla_bot_v3", 0.4),("self", 0.4), ("best", 0.1), ("past", 0.1)]
 ]
 
 PHASE_ADVANCE_THRESHOLD = {
     0: 0.90,
-    1: 0.85,
-    2: 0.80,
+    1: 0.80,
+    2: 0.70,
     3: 0.70,
-    4: 0.65,
-    5: 0.55
+    4: 0.70,
+    5: 0.70,
+    6: 0.70
 }
