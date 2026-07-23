@@ -44,7 +44,7 @@ def train_network(replay_data, output_model_path, nnet, epochs=None):
     """
         
     print(f"Training on {len(replay_data)} raw samples (augmenting on-the-fly)...")
-    pi_loss, v_loss, total_loss = nnet.train(replay_data, epochs=epochs)
+    pi_loss, v_loss, total_loss, entropy = nnet.train(replay_data, epochs=epochs)
     
     print(f"Training complete. Loss -> Policy: {pi_loss:.4f} | Value: {v_loss:.4f} | Total: {total_loss:.4f} | Entropy: {entropy:.4f}")
     
