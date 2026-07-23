@@ -32,10 +32,12 @@ class SelfPlayGenerator:
             'l2_reg': 1e-4,
             'num_iters': 1200,
             'num_eps': 100,
-            'temp_threshold': 15,
+            'temp_threshold': 40,
             'temperature_initial': 1.0,
+            'temperature_medium': 0.5,
             'temperature_final': 0.0,
-            'temperature_drop_move': 15,
+            'temperature_drop_move': 40,
+            'temperature_medium_end_move': 55,
             'maxlen_queue': config.MAX_REPLAY_SIZE,
             'start_fill_pct': 0.8,
             'fill_decay': 0.05,
@@ -76,10 +78,11 @@ class SelfPlayGenerator:
     def play_games(self, num_games, save_dir, worker_id="worker", model_version=0, current_phase=0,epoch =0):
         print(f"epoch {epoch} - Starting generation of {num_games} games at Phase {current_phase}...")
  
-        # 2. Determine opponent pool based on phase (matching coach.py configuration)
-        current_pool = []
-        for phase_idx in range(min(current_phase + 1, len(config.PHASES_CONFIG))):
-            current_pool.extend(config.PHASES_CONFIG[phase_idx])
+        # Determine opponent pool: current phase + next phase combined
+        current_pool = list(config.PHASES_CONFIG[current_phase])
+        next_phase = min(current_phase + 1, len(config.PHASES_CONFIG) - 1)
+        if next_phase != current_phase:
+            current_pool.extend(config.PHASES_CONFIG[next_phase])
             
         total_prob = sum(p for _, p in current_pool)
         normalized_probs = [p / total_prob for _, p in current_pool]
@@ -162,7 +165,9 @@ class SelfPlayGenerator:
                                 bot_stats[opp_type]['wins'] += 1
                                 
                 except Exception as e:
+                    import traceback
                     print(f"Worker execution failed: {e}")
+                    traceback.print_exc()
                 finally:
                     pbar.update(chunk_size)
 
@@ -220,9 +225,16 @@ class SelfPlayGenerator:
         return filename
 
 if __name__ == "__main__":
+    import argparse
     import torch
     import model_manager
-    print("Testing SelfPlayGenerator locally...")
+    
+    parser = argparse.ArgumentParser(description="Test SelfPlayGenerator locally")
+    parser.add_argument("--phase", type=int, default=6, help="Phase index to test")
+    parser.add_argument("--games", type=int, default=2, help="Number of games to generate")
+    args = parser.parse_args()
+    
+    print(f"Testing SelfPlayGenerator locally (Phase {args.phase}, Games {args.games})...")
     
     generator = SelfPlayGenerator()
     
@@ -236,14 +248,18 @@ if __name__ == "__main__":
     elif os.path.exists(best_path):
         test_model_path = best_path
         
-    
     print(f"Loading model from: {test_model_path}")
-    generator.load_model(test_model_path)
+    if test_model_path:
+        generator.load_model(test_model_path)
     
-    # Test generation of 2 games
+    # Test generation of games
     test_save_dir = os.path.join(PROJECT_ROOT, "storage", "test_replay")
-    print(f"Running 2 self-play games to test worker pipeline...")
-    saved_file = generator.play_games(num_games=2, save_dir=test_save_dir)
+    print(f"Running {args.games} self-play games to test worker pipeline...")
+    saved_file = generator.play_games(
+        num_games=args.games, 
+        save_dir=test_save_dir,
+        current_phase=args.phase
+    )
     
     if saved_file and os.path.exists(saved_file):
         print(f"\\nSUCCESS! Test replay saved to {saved_file}")

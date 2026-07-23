@@ -46,7 +46,7 @@ MIN_REPLAY_SIZE = 2000
 
 # Evaluation defaults
 EVAL_GAMES = 50
-PROMOTION_THRESHOLD = 0.52
+PROMOTION_THRESHOLD = 0.55
 
 
 # ===================
@@ -93,12 +93,20 @@ UPLOAD_REPLAY_API = "/upload_replay"
 
 # Curriculum phases configuration
 PHASES_CONFIG = [
-    [("random", 0.01)],
-    [("greedy", 0.02)],
-    [("greedy_chain", 0.02)],
-    [("simple_bot", 0.04)],
-    [("simple_bot_v2", 0.05)],
-    [("ucla_bot_v3", 0.06)],
-    [("self", 0.6), ("best", 0.1), ("past", 0.15)]
+    [("random", 0.05)],
+    [("greedy", 0.05)],
+    [("greedy_chain", 0.05)],
+    [("simple_bot", 0.05)],
+    [("simple_bot_v2", 0.1)],
+    [("ucla_bot_v3", 0.1)],
+    [("self", 0.4), ("best", 0.1), ("past", 0.1)]
 ]
 
+PHASE_ADVANCE_THRESHOLD = {
+    0: 0.90,
+    1: 0.85,
+    2: 0.80,
+    3: 0.70,
+    4: 0.65,
+    5: 0.55
+}

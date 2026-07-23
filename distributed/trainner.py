@@ -46,14 +46,14 @@ def train_network(replay_data, output_model_path, nnet, epochs=None):
     print(f"Training on {len(replay_data)} raw samples (augmenting on-the-fly)...")
     pi_loss, v_loss, total_loss = nnet.train(replay_data, epochs=epochs)
     
-    print(f"Training complete. Loss -> Policy: {pi_loss:.4f} | Value: {v_loss:.4f} | Total: {total_loss:.4f}")
+    print(f"Training complete. Loss -> Policy: {pi_loss:.4f} | Value: {v_loss:.4f} | Total: {total_loss:.4f} | Entropy: {entropy:.4f}")
     
     # Save the trained candidate model
     os.makedirs(os.path.dirname(output_model_path), exist_ok=True)
     model_manager.save_latest_model(nnet)
     print(f"Candidate model saved to {output_model_path}")
     
-    return {"pi_loss": pi_loss, "v_loss": v_loss, "total_loss": total_loss}
+    return {"pi_loss": pi_loss, "v_loss": v_loss, "total_loss": total_loss, "entropy": entropy}
 
 def load_training_checkpoint():
     """Resume interrupted training. (Currently handled dynamically in train_network)"""
@@ -166,8 +166,9 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
         # Advance phase only when the model is genuinely winning, 
         # with a backstop of 20 iterations so training never stalls forever.
         phase_iterations = iteration % 20  # rough estimate of iters spent in current phase
-        if (max_client_winrate >= 0.60 or phase_iterations == 0) and current_phase < len(config.PHASES_CONFIG) - 1:
-            reason = f"Winrate {max_client_winrate:.1%} >= 60%" if max_client_winrate >= 0.60 else "Max phase iterations reached"
+        threshold = config.PHASE_ADVANCE_THRESHOLD.get(current_phase, 0.60)
+        if (max_client_winrate >= threshold or phase_iterations == 0) and current_phase < len(config.PHASES_CONFIG) - 2:
+            reason = f"Winrate {max_client_winrate:.1%} >= {threshold:.0%}" if max_client_winrate >= threshold else "Max phase iterations reached"
             print(f"\n===========================================================")
             print(f"Phase {current_phase} cleared ({reason})!")
             print(f"Advancing to Phase {current_phase + 1}...")
@@ -207,6 +208,7 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
         writer.add_scalar('Log/Policy_Loss', losses["pi_loss"], iteration)
         writer.add_scalar('Log/Value_Loss', losses["v_loss"], iteration)
         writer.add_scalar('Log/Total_Loss', losses["total_loss"], iteration)
+        writer.add_scalar('Log/Policy_Entropy', losses["entropy"], iteration)
         writer.add_scalar('Log/Memory_Size', len(replay_data), iteration)
         writer.add_scalar('Log/Learning_Rate', current_lr, iteration)
     

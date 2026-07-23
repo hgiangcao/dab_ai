@@ -155,29 +155,32 @@ class NNetWrapper:
         total_pi_loss = 0.0
         total_v_loss = 0.0
         total_loss_all = 0.0
+        total_entropy = 0.0
 
         for epoch in range(epochs):
             print(f'Epoch {epoch+1}/{epochs}')
-            pi_l, v_l, t_l = self._train_epoch(dataloader)
+            pi_l, v_l, t_l, ent = self._train_epoch(dataloader)
             total_pi_loss += pi_l
             total_v_loss += v_l
             total_loss_all += t_l
+            total_entropy += ent
             
         # Step the LR scheduler once per training call (one training iteration)
         self.scheduler.step()
         current_lr = self.optimizer.param_groups[0]['lr']
         print(f"LR after scheduler step: {current_lr:.2e}")
-        return total_pi_loss / epochs, total_v_loss / epochs, total_loss_all / epochs
+        return total_pi_loss / epochs, total_v_loss / epochs, total_loss_all / epochs, total_entropy / epochs
 
     def _train_epoch(self, dataloader):
         if len(dataloader) == 0:
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, 0.0
             
         t = tqdm(dataloader, desc='Training Network')
         
         pi_losses = []
         v_losses = []
         total_losses = []
+        entropies = []
 
         for boards, target_pis, target_vs in t:
             # Transfer directly to device using non_blocking for speed
@@ -192,20 +195,25 @@ class NNetWrapper:
             l_pi = self.loss_pi(target_pis, out_pi)
             l_v = self.loss_v(target_vs, out_v)
             total_loss = l_pi + l_v
+            
+            # calculate entropy of output policy
+            probs = torch.exp(out_pi)
+            entropy = -torch.sum(probs * out_pi) / probs.size()[0]
 
             # record loss
             pi_losses.append(l_pi.item())
             v_losses.append(l_v.item())
             total_losses.append(total_loss.item())
+            entropies.append(entropy.item())
             
-            t.set_postfix(Loss_pi=l_pi.item(), Loss_v=l_v.item())
+            t.set_postfix(Loss_pi=l_pi.item(), Loss_v=l_v.item(), Ent=entropy.item())
 
             # compute gradient and do SGD step
             self.optimizer.zero_grad()
             total_loss.backward()
             self.optimizer.step()
             
-        return sum(pi_losses)/len(pi_losses), sum(v_losses)/len(v_losses), sum(total_losses)/len(total_losses)
+        return sum(pi_losses)/len(pi_losses), sum(v_losses)/len(v_losses), sum(total_losses)/len(total_losses), sum(entropies)/len(entropies)
 
     def predict(self, board):
         """

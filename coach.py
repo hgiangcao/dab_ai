@@ -149,6 +149,7 @@ def worker_execute_episode_chunk(worker_args):
         if opp_type == "self":
             return None
 
+    def get_opponent(opp_type, opp_path):
         key = (opp_type, opp_path)
         if key in opponent_cache:
             return opponent_cache[key]
@@ -163,6 +164,7 @@ def worker_execute_episode_chunk(worker_args):
             def agent_opp(g, t):
                 pi = mcts_opp.play(g, temp=t, add_root_noise=True)
                 return pi, mcts_opp.max_depth_reached
+            agent_opp.reset = lambda: None
 
         elif opp_type == "alpha_beta_0.1s":
             from bots.alpha_beta import AlphaBetaPlayer
@@ -173,6 +175,7 @@ def worker_execute_episode_chunk(worker_args):
                 pi = np.zeros(g.N_LINES, dtype=np.float32)
                 pi[move] = 1.0
                 return pi, 0
+            agent_opp.reset = lambda: None
 
         elif opp_type == "mcts_0.1s":
             from bots.mcts_x import MCTSGAgent
@@ -183,6 +186,7 @@ def worker_execute_episode_chunk(worker_args):
                 pi = np.zeros(g.N_LINES, dtype=np.float32)
                 pi[move] = 1.0
                 return pi, 0
+            agent_opp.reset = lambda: None
 
         elif opp_type == "random":
             import random as rand
@@ -193,6 +197,7 @@ def worker_execute_episode_chunk(worker_args):
                 pi = np.zeros(g.N_LINES, dtype=np.float32)
                 pi[move] = 1.0
                 return pi, 0
+            agent_opp.reset = lambda: None
 
         elif opp_type == "greedy":
             from bots.greedy import GreedyPlayer
@@ -203,6 +208,7 @@ def worker_execute_episode_chunk(worker_args):
                 pi = np.zeros(g.N_LINES, dtype=np.float32)
                 pi[move] = 1.0
                 return pi, 0
+            agent_opp.reset = lambda: None
 
         elif opp_type == "greedy_chain":
             from bots.greedy_improve import GreedyChainPlayer
@@ -213,6 +219,7 @@ def worker_execute_episode_chunk(worker_args):
                 pi = np.zeros(g.N_LINES, dtype=np.float32)
                 pi[move] = 1.0
                 return pi, 0
+            agent_opp.reset = lambda: None
 
         elif opp_type == "ucla_bot_v3":
             from bots.ucla_bot import UCLABot_v3
@@ -223,6 +230,7 @@ def worker_execute_episode_chunk(worker_args):
                 pi = np.zeros(g.N_LINES, dtype=np.float32)
                 pi[move] = 1.0
                 return pi, 0
+            agent_opp.reset = lambda: baseline.move_queue.clear()
 
         elif opp_type == "simple_bot":
             from bots.simple_bot import SimpleBot
@@ -233,6 +241,7 @@ def worker_execute_episode_chunk(worker_args):
                 pi = np.zeros(g.N_LINES, dtype=np.float32)
                 pi[move] = 1.0
                 return pi, 0
+            agent_opp.reset = lambda: None
 
         elif opp_type == "simple_bot_v2":
             from bots.simple_bot_v2 import SimpleBotV2
@@ -243,6 +252,7 @@ def worker_execute_episode_chunk(worker_args):
                 pi = np.zeros(g.N_LINES, dtype=np.float32)
                 pi[move] = 1.0
                 return pi, 0
+            agent_opp.reset = lambda: None
 
         else:
             raise ValueError(f"Unknown opponent type: {opp_type}")
@@ -254,7 +264,12 @@ def worker_execute_episode_chunk(worker_args):
         if opp_type in ["best", "past"] and opp_path is None:
             opp_type = "self"
 
-        agent_opp = get_opponent(opp_type, opp_path)
+        if opp_type != "self":
+            agent_opp = get_opponent(opp_type, opp_path)
+            if hasattr(agent_opp, 'reset'):
+                agent_opp.reset()
+        else:
+            agent_opp = None
         p1_is_latest = random.choice([True, False])
 
         train_examples = []
@@ -269,13 +284,20 @@ def worker_execute_episode_chunk(worker_args):
         episode_step = 0
         depths = []
         temperature_initial = getattr(args, "temperature_initial", 1.0)
+        temperature_medium = getattr(args, "temperature_medium", 0.5)
         temperature_final = getattr(args, "temperature_final", 0.0)
-        drop_move = getattr(args, "temperature_drop_move", getattr(args, "temp_threshold", 15))
+        drop_move = getattr(args, "temperature_drop_move", getattr(args, "temp_threshold", 40))
+        medium_end_move = getattr(args, "temperature_medium_end_move", 55)
 
         while game.is_running():
             episode_step += 1
             move_number = int(np.count_nonzero(game.l))
-            temp = float(temperature_initial if move_number < drop_move else temperature_final)
+            if move_number < drop_move:
+                temp = float(temperature_initial)
+            elif move_number < medium_end_move:
+                temp = float(temperature_medium)
+            else:
+                temp = float(temperature_final)
 
             is_latest_turn = (game.current_player == 1) == p1_is_latest
 
@@ -476,9 +498,10 @@ class AlphaZeroTrainer:
             
             episode_specs = []
             
-            current_pool = []
-            for phase_idx in range(self.current_phase + 1):
-                current_pool.extend(config.PHASES_CONFIG[phase_idx])
+            current_pool = list(config.PHASES_CONFIG[self.current_phase])
+            next_phase = min(self.current_phase + 1, len(config.PHASES_CONFIG) - 1)
+            if next_phase != self.current_phase:
+                current_pool.extend(config.PHASES_CONFIG[next_phase])
                 
             total_prob = sum(p for _, p in current_pool)
             normalized_probs = [p / total_prob for _, p in current_pool]
@@ -535,8 +558,9 @@ class AlphaZeroTrainer:
             print(f"Phase {self.current_phase} Winrate: {phase_winrate:.1%} ({self.phase_wins}/{self.phase_decisive})")
             
             self.iterations_in_current_phase += 1
-            if (phase_winrate >= 0.60 or self.iterations_in_current_phase >= 200) and self.current_phase < len(config.PHASES_CONFIG) - 1:
-                reason = "winrate >= 60%" if phase_winrate >= 0.60 else "max iterations reached"
+            threshold = config.PHASE_ADVANCE_THRESHOLD.get(self.current_phase, 0.60)
+            if (phase_winrate >= threshold or self.iterations_in_current_phase >= 200) and self.current_phase < len(config.PHASES_CONFIG) - 2:
+                reason = f"winrate >= {threshold:.0%}" if phase_winrate >= threshold else "max iterations reached"
                 print(f"Phase {self.current_phase} cleared ({reason})! Advancing to Phase {self.current_phase + 1}...")
                 self.current_phase += 1
                 self.phase_wins = 0
