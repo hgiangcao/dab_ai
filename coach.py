@@ -284,20 +284,14 @@ def worker_execute_episode_chunk(worker_args):
         episode_step = 0
         depths = []
         temperature_initial = getattr(args, "temperature_initial", 1.0)
-        temperature_medium = getattr(args, "temperature_medium", 0.5)
         temperature_final = getattr(args, "temperature_final", 0.0)
-        drop_move = getattr(args, "temperature_drop_move", getattr(args, "temp_threshold", 40))
-        medium_end_move = getattr(args, "temperature_medium_end_move", 55)
+        temp_threshold = getattr(args, "temp_threshold", 15)
 
         while game.is_running():
             episode_step += 1
             move_number = int(np.count_nonzero(game.l))
-            if move_number < drop_move:
-                temp = float(temperature_initial)
-            elif move_number < medium_end_move:
-                temp = float(temperature_medium)
-            else:
-                temp = float(temperature_final)
+            
+            temp = float(temperature_initial) if move_number < temp_threshold else float(temperature_final)
 
             is_latest_turn = (game.current_player == 1) == p1_is_latest
 
