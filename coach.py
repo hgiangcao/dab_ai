@@ -284,14 +284,20 @@ def worker_execute_episode_chunk(worker_args):
         episode_step = 0
         depths = []
         temperature_initial = getattr(args, "temperature_initial", 1.0)
+        temperature_medium = getattr(args, "temperature_medium", 0.5)
         temperature_final = getattr(args, "temperature_final", 0.0)
-        temp_threshold = getattr(args, "temp_threshold", 15)
+        drop_move = getattr(args, "temperature_drop_move", getattr(args, "temp_threshold", 40))
+        medium_end_move = getattr(args, "temperature_medium_end_move", 55)
 
         while game.is_running():
             episode_step += 1
             move_number = int(np.count_nonzero(game.l))
-            
-            temp = float(temperature_initial) if move_number < temp_threshold else float(temperature_final)
+            if move_number < drop_move:
+                temp = float(temperature_initial)
+            elif move_number < medium_end_move:
+                temp = float(temperature_medium)
+            else:
+                temp = float(temperature_final)
 
             is_latest_turn = (game.current_player == 1) == p1_is_latest
 
@@ -493,6 +499,9 @@ class AlphaZeroTrainer:
             episode_specs = []
             
             current_pool = list(config.PHASES_CONFIG[self.current_phase])
+            next_phase = min(self.current_phase + 1, len(config.PHASES_CONFIG) - 1)
+            if next_phase != self.current_phase:
+                current_pool.extend(config.PHASES_CONFIG[next_phase])
                 
             total_prob = sum(p for _, p in current_pool)
             normalized_probs = [p / total_prob for _, p in current_pool]
@@ -550,7 +559,7 @@ class AlphaZeroTrainer:
             
             self.iterations_in_current_phase += 1
             threshold = config.PHASE_ADVANCE_THRESHOLD.get(self.current_phase, 0.60)
-            if (phase_winrate >= threshold or self.iterations_in_current_phase >= 200) and self.current_phase < len(config.PHASES_CONFIG) - 1:
+            if (phase_winrate >= threshold or self.iterations_in_current_phase >= 200) and self.current_phase < len(config.PHASES_CONFIG) - 2:
                 reason = f"winrate >= {threshold:.0%}" if phase_winrate >= threshold else "max iterations reached"
                 print(f"Phase {self.current_phase} cleared ({reason})! Advancing to Phase {self.current_phase + 1}...")
                 self.current_phase += 1

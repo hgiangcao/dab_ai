@@ -165,9 +165,9 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
             
         # Advance phase only when the model is genuinely winning, 
         # with a backstop of 20 iterations so training never stalls forever.
-        phase_iterations = iteration % 20  # rough estimate of iters spent in current phase
+        phase_iterations = iteration % 30  # rough estimate of iters spent in current phase
         threshold = config.PHASE_ADVANCE_THRESHOLD.get(current_phase, 0.60)
-        if (max_client_winrate >= threshold or phase_iterations == 0) and current_phase < len(config.PHASES_CONFIG) - 1:
+        if (max_client_winrate >= threshold or phase_iterations == 0) and current_phase < len(config.PHASES_CONFIG) - 2:
             reason = f"Winrate {max_client_winrate:.1%} >= {threshold:.0%}" if max_client_winrate >= threshold else "Max phase iterations reached"
             print(f"\n===========================================================")
             print(f"Phase {current_phase} cleared ({reason})!")
