@@ -30,13 +30,59 @@ class MCTS:
         self.dirichlet_alpha = mcts_parameters.get("dirichlet_alpha", 0.0)
         self.time_limit = mcts_parameters.get("time_limit", None)
         self.max_depth_reached = 0
+        # Tree reuse: keep the root node between play() calls.
+        # After each move is chosen we advance _root to the chosen child,
+        # so all simulations done on that subtree are immediately available
+        # on the next call instead of being discarded.
+        self._root: AZNode = None
 
-    def play(self, game_state, temp: int, add_root_noise: bool = False) -> list:
-        root = AZNode(parent=None, s=game_state.clone(track_history=False), a=None)
+    def reset_tree(self):
+        """Discard the cached tree (call at the start of every new game)."""
+        self._root = None
+
+    def _advance_root(self, last_action: int, game_state) -> AZNode:
+        """
+        Advance the cached root to the child corresponding to last_action.
+        If the child doesn't exist yet (opponent played an unexplored move),
+        build a fresh root from the current game state instead.
+        Returns the new root node.
+        """
+        if self._root is not None and last_action is not None:
+            child = self._root.children.get(last_action)
+            if child is not None:
+                # Detach from parent to allow GC of the old subtree
+                child.a = None
+                return child
+
+        # Cache miss or no previous tree: create a fresh root
+        return AZNode(parent=None, s=game_state.clone(track_history=False), a=None)
+
+    def play(self, game_state, temp: int, add_root_noise: bool = False,
+             last_action: int = None) -> list:
+        """
+        Run MCTS from the current game_state and return a policy vector.
+
+        Parameters
+        ----------
+        game_state    : current DotsAndBoxesGame
+        temp          : temperature for move selection
+        add_root_noise: add Dirichlet noise at root (self-play only)
+        last_action   : the move that was just played on the board
+                        (used to advance the cached tree; pass None for the
+                        very first move of a game or after reset_tree()).
+        """
+        # Advance (or create) the root using the tree from the previous move
+        root = self._advance_root(last_action, game_state)
+
+        # Safety check: if the cached state doesn't match, rebuild from scratch
+        if root.s != game_state:
+            root = AZNode(parent=None, s=game_state.clone(track_history=False), a=None)
+
         valid_moves = root.s.get_valid_moves()
         self.max_depth_reached = 0
 
         if not valid_moves:
+            self._root = root
             return [0.0] * root.s.N_LINES
 
         dirichlet_noise = None
@@ -60,16 +106,21 @@ class MCTS:
             if temp == 0:
                 probs = np.zeros(root.s.N_LINES, dtype=np.float64)
                 probs[int(np.argmax(fallback))] = 1.0
+                self._root = root
                 return probs.tolist()
+            self._root = root
             return fallback.tolist()
 
         if temp == 0:
             probs = np.zeros(root.s.N_LINES, dtype=np.float64)
             probs[int(np.argmax(counts))] = 1.0
+            self._root = root
             return probs.tolist()
 
         probs = counts ** (1.0 / temp)
         total_sum = float(sum(probs))
+
+        self._root = root
         if total_sum > 0:
             return (probs / total_sum).tolist()
         return self._uniform_policy(root.s.N_LINES, valid_moves).tolist()
@@ -207,7 +258,16 @@ class MCTSAgent(BaseAgent):
     def __init__(self, name: str, model, mcts_parameters: dict):
         super().__init__(name)
         self.mcts = MCTS(model, mcts_parameters)
+        self._last_action: int = None
+
+    def reset(self):
+        """Call at the start of each new game to discard stale tree state."""
+        self.mcts.reset_tree()
+        self._last_action = None
 
     def get_move(self, game_state) -> int:
-        probs = self.mcts.play(game_state, temp=0, add_root_noise=False)
-        return int(np.argmax(probs))
+        probs = self.mcts.play(game_state, temp=0, add_root_noise=False,
+                               last_action=self._last_action)
+        action = int(np.argmax(probs))
+        self._last_action = action
+        return action

@@ -273,13 +273,20 @@ def worker_execute_episode_chunk(worker_args):
         p1_is_latest = random.choice([True, False])
 
         train_examples = []
-        game = DotsAndBoxesGame(size=game_size, starting_player=1, early_stopping=True)
+        game = DotsAndBoxesGame(size=game_size, starting_player=1, early_stopping=False)
+
+        # Reset MCTS tree at the start of every episode so stale subtrees
+        # from a previous game don't bleed into this one.
+        mcts_latest.reset_tree()
+        last_action_for_mcts = None  # tracks last move played so tree can be advanced
 
         # Reverse Curriculum Logic: Pre-fill the board using the historical log sequence.
         if game_sequence is not None and start_fill_pct >= 0.001:
             target_move_index = int(len(game_sequence) * start_fill_pct)
             for move in game_sequence[:target_move_index]:
                 game.execute_move(move)
+            # Pre-fill moves are not from MCTS — start fresh from this position
+            last_action_for_mcts = None
 
         episode_step = 0
         depths = []
@@ -302,7 +309,8 @@ def worker_execute_episode_chunk(worker_args):
             is_latest_turn = (game.current_player == 1) == p1_is_latest
 
             if is_latest_turn or opp_type == "self":
-                pi = mcts_latest.play(game, temp=temp, add_root_noise=True)
+                pi = mcts_latest.play(game, temp=temp, add_root_noise=True,
+                                      last_action=last_action_for_mcts)
                 depths.append(mcts_latest.max_depth_reached)
 
                 canonical_lines = game.get_canonical_lines()
@@ -323,6 +331,10 @@ def worker_execute_episode_chunk(worker_args):
             except AssertionError as e:
                 agent_name = "self" if is_latest_turn else opp_type
                 raise AssertionError(f"Agent '{agent_name}' attempted invalid move {action}. Error: {e}") from e
+
+            # Advance the tree pointer: the action just played becomes the
+            # last_action for the next MCTS call so the subtree is reused.
+            last_action_for_mcts = action
 
         r = game.result
         avg_depth = sum(depths) / len(depths) if depths else 0

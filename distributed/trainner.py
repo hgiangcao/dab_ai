@@ -191,12 +191,28 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     
     # Accumulate into rolling replay buffer (experience replay window)
     if replay_buffer is not None:
+        # Snapshot the old buffer BEFORE extending — avoids numpy ambiguous
+        # truth-value errors that happen when using "s not in new_data" on
+        # tuples containing numpy arrays.
+        old_data = list(replay_buffer)
         replay_buffer.extend(new_data)
-        replay_data = list(replay_buffer)
-        print(f"Replay buffer: {len(new_data)} new + {len(replay_data) - len(new_data)} retained = {len(replay_data)} total samples")
+
+        # Freshness bias: 70% of training batch from the newest data,
+        # 30% from the older rolling buffer. This prevents stale Phase-0
+        # data from dominating when the model has already advanced phases.
+        import random as _rnd
+        n_total = min(len(replay_buffer), config.MAX_REPLAY_SIZE)
+        n_fresh = min(int(n_total * 0.70), len(new_data))
+        n_old   = min(n_total - n_fresh, len(old_data))
+        fresh_sample = _rnd.sample(new_data, n_fresh) if n_fresh < len(new_data) else list(new_data)
+        old_sample   = _rnd.sample(old_data,  n_old)  if n_old  < len(old_data)  else old_data
+        replay_data  = fresh_sample + old_sample
+        _rnd.shuffle(replay_data)
+        print(f"Replay buffer: {len(new_data)} new + {len(old_data)} retained → "
+              f"training on {len(fresh_sample)} fresh + {len(old_sample)} old = {len(replay_data)} samples")
     else:
         replay_data = new_data
-        
+
     # 4. Train candidate network
     merged_path = replay_manager.merge_replay(claimed_files)
     candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
@@ -226,7 +242,20 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     
     if promoted_model:
         print("Model promoted! Cleaning up old data...")
-        
+        # Invalidate the persistent self-play executor so workers reload
+        # the newly promoted model on the next self-play batch. Without
+        # this, workers keep using the pre-promotion weights indefinitely.
+        try:
+            import coach as _coach
+            if _coach._SELFPLAY_EXECUTOR is not None:
+                print("Shutting down stale self-play executor so workers reload new model...")
+                _coach._SELFPLAY_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+                _coach._SELFPLAY_EXECUTOR = None
+                _coach._SELFPLAY_EXECUTOR_MODEL_SIGNATURE = None
+                _coach._SELFPLAY_EXECUTOR_MAX_WORKERS = None
+        except Exception as _e:
+            print(f"Warning: could not reset self-play executor: {_e}")
+
     # 6. Mark files as used
     replay_manager.mark_used(claimed_files)
     
