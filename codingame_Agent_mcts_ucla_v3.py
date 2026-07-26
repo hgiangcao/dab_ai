@@ -286,9 +286,7 @@ class MCTS:
         random.shuffle(safe_edge)
         random.shuffle(safe_center)
         random.shuffle(dangerous)
-        if captures or safe_edge or safe_center:
-            return captures + safe_edge + safe_center
-        return dangerous
+        return captures + safe_edge + safe_center + dangerous
 
 
 class UCLABot_v3(BaseAgent):
@@ -297,8 +295,15 @@ class UCLABot_v3(BaseAgent):
         self.move_queue: List[int] = []
 
     def get_move(self, game) -> int:
+        import numpy as _np2
+        if int(_np2.count_nonzero(game.l)) == 0:
+            self.move_queue.clear()
         if self.move_queue:
-            return self.move_queue.pop(0)
+            mv = self.move_queue[0]
+            if game.l[mv] != 0:
+                self.move_queue.clear()
+            else:
+                return self.move_queue.pop(0)
         self.size = game.SIZE
         self.m = self.size
         self.n = self.size

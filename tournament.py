@@ -83,18 +83,21 @@ def create_agent(name: str, size: int):
     elif name == "UCLABot_v3":
         from bots.ucla_bot import UCLABot_v3
         return UCLABot_v3(name=name)
+    elif name == "UCLABot_v4":
+        from bots.ucla_bot_v4 import UCLABot_v4
+        return UCLABot_v4(name=name)
     elif name == "UCLAGreedyBot":
         from bots.ucla_bot_heuristic import UCLAGreedyBot
         return UCLAGreedyBot(name=name)
     elif name == "UCLAAlphaBeta":
         from bots.ucla_alpha_beta import UCLAAlphaBeta
         return UCLAAlphaBeta(name=name)
-    elif name == "UCLA_MCTS_100":
-        from bots.ucla_mcts import UCLAMCTS
-        return UCLAMCTS(name=name, n_simulations=100, time_limit=None)
-    elif name == "UCLA_MCTS_200":
-        from bots.ucla_mcts import UCLAMCTS
-        return UCLAMCTS(name=name, n_simulations=200, time_limit=None)
+    elif name == "UCLA_MCTS_0.1":
+        from bots.ucla_mcts import UCLAMCTSBot
+        return UCLAMCTSBot(name=name, time_limit=0.1)
+    elif name == "UCLA_MCTS_0.2":
+        from bots.ucla_mcts import UCLAMCTSBot
+        return UCLAMCTSBot(name=name, time_limit=0.2)
     elif name == "SimpleBot":
         from bots.simple_bot import SimpleBot
         return SimpleBot(name=name)
@@ -116,6 +119,12 @@ def run_single_matchup(args):
     draws = 0
     game_records = []
     
+    a1_moves = 0
+    a2_moves = 0
+    a1_time = 0.0
+    a2_time = 0.0
+    import time
+    
     for i in tqdm(range(num_games), desc=f"Playing {agent1_name} vs {agent2_name}"):
         agent1 = create_agent(agent1_name, size)
         agent2 = create_agent(agent2_name, size)
@@ -128,9 +137,15 @@ def run_single_matchup(args):
         
         while game.is_running():
             if game.current_player == 1:
+                start_t = time.time()
                 move = agent1.get_move(game)
+                a1_time += (time.time() - start_t)
+                a1_moves += 1
             else:
+                start_t = time.time()
                 move = agent2.get_move(game)
+                a2_time += (time.time() - start_t)
+                a2_moves += 1
             
             game_moves.append(int(move))
             dummy_pi = [0.0] * game.N_LINES
@@ -152,7 +167,7 @@ def run_single_matchup(args):
             "policies": game_policies
         })
             
-    return agent1_name, agent2_name, a1_wins, a2_wins, draws, game_records
+    return agent1_name, agent2_name, a1_wins, a2_wins, draws, game_records, a1_moves, a1_time, a2_moves, a2_time
 
 def plot_heatmap(matrix, agent_names, output_path):
     plt.figure(figsize=(10, 8))
@@ -191,8 +206,8 @@ def main():
     # List of agent names to include in the tournament
     agent_names = [
         # "Random", 
-        "Greedy", 
-        "Greedy Chain",
+        # "Greedy", 
+        # "Greedy Chain",
         # "Alpha-Beta (0.1s)", 
         # "Alpha-Beta (0.5s)", 
         # "Alpha-Beta v1 (0.1s)",
@@ -206,12 +221,15 @@ def main():
         # "UCLABot",
         # "UCLABot_v2",
         "UCLABot_v3",
+        # "UCLABot_v4",   
         # "UCLAGreedyBot",
         # "UCLAAlphaBeta",
         # "UCLA_MCTS_100",
         # "UCLA_MCTS_200",
-        "SimpleBot",
-        "SimpleBot_v2"
+        # "SimpleBot",
+        # "SimpleBot_v2",
+        "UCLA_MCTS_0.1",
+        "UCLA_MCTS_0.2",
     ]
     n_agents = len(agent_names)
     
@@ -226,12 +244,15 @@ def main():
     print(f"Starting tournament: {n_agents} agents, size={args.size}x{args.size}, games={args.games} per matchup.")
     print(f"Running on {num_cores} worker processes...")
     
+    agent_moves = {name: 0 for name in agent_names}
+    agent_time = {name: 0.0 for name in agent_names}
+    
     results = []
     with mp.Pool(num_cores) as pool:
         pbar = tqdm(pool.imap_unordered(run_single_matchup, tasks), total=len(tasks), desc="Running Matchups")
         for res in pbar:
             results.append(res)
-            a1_name, a2_name, a1_wins, a2_wins, draws, _ = res
+            a1_name, a2_name, a1_wins, a2_wins, draws, _, _, _, _, _ = res
             a1_wr = (a1_wins + 0.5 * draws) / args.games
             a2_wr = (a2_wins + 0.5 * draws) / args.games
             pbar.set_postfix_str(f"{a1_name} vs {a2_name}: {a1_wr:.1%} vs {a2_wr:.1%} ({a1_wins}W-{a2_wins}L-{draws}D)")
@@ -250,13 +271,15 @@ def main():
     log_path = "game_logs_bot.jsonl"
     print(f"Saving played tournament games to {log_path}...")
     with open(log_path, "a") as f_log:
-        for a1_name, a2_name, a1_wins, a2_wins, draws, game_records in results:
+        for res in results:
+            a1_name, a2_name, a1_wins, a2_wins, draws, game_records, a1_moves, a1_time, a2_moves, a2_time = res
             idx1 = name_to_idx[a1_name]
             idx2 = name_to_idx[a2_name]
             
-            # Save game records to file
-            # for record in game_records:
-            #     f_log.write(json.dumps(record) + '\n')
+            agent_moves[a1_name] += a1_moves
+            agent_time[a1_name] += a1_time
+            agent_moves[a2_name] += a2_moves
+            agent_time[a2_name] += a2_time
             
             # Winrate of Agent 1 against Agent 2
             wr1 = (a1_wins + 0.5 * draws) / args.games
@@ -265,6 +288,15 @@ def main():
             
             winrate_matrix[idx1][idx2] = wr1
             winrate_matrix[idx2][idx1] = wr2
+
+    # Print move speed results to stdout
+    print("\n--- Move Speed Report (moves/second) ---")
+    for name in agent_names:
+        m_count = agent_moves[name]
+        total_t = agent_time[name]
+        mps = m_count / total_t if total_t > 0 else 0.0
+        print(f"{name:<20} | Moves: {m_count:<6} | Total Time: {total_t:<8.3f}s | Moves/Sec: {mps:.2f}")
+    print("-" * 60)
 
     # Print results to stdout
     print("\n--- Winrate Matrix (Row Agent vs Column Opponent) ---")

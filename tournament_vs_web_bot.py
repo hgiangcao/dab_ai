@@ -19,7 +19,8 @@ from bots.alpha_beta import AlphaBetaPlayer
 from bots.mcts_x import MCTSGAgent
 from bots.greedy import GreedyPlayer
 from bots.greedy_improve import GreedyChainPlayer
-from bots.ucla_bot import UCLABot, UCLABot_v2, UCLABot_v3
+from bots.ucla_bot import UCLABot, UCLABot_v2, UCLABot_v3, UCLABot_MCTS
+from bots.ucla_bot_v4 import UCLABot_v4
 from web_gui_game import RandomBot, AlphaZeroAgent
 
 class WebTournament:
@@ -35,9 +36,11 @@ class WebTournament:
             # "AlphaBeta_10s": lambda _: AlphaBetaPlayer(name="AlphaBeta_10s", time_limit=10.0),
             # "UCLABot": lambda _: UCLABot("UCLA JS Bot"),
             # "UCLABot_v2": lambda _: UCLABot_v2("UCLA JS Bot v2"),
-            #"UCLABot_v3": lambda _: UCLABot_v3("UCLA JS Bot v3"),
+            "UCLABot_v4": lambda _: UCLABot_v4("UCLA JS Bot v4"),
+            "UCLABot_v3": lambda _: UCLABot_v3("UCLA JS Bot v3"),
+            "UCLABot_MCTS": lambda _: UCLABot_MCTS("UCLA JS Bot MCTS"),
             # "UCLAGreedyBot": lambda _: __import__('bots.ucla_bot_heuristic', fromlist=['UCLAGreedyBot']).UCLAGreedyBot("UCLA Greedy"),
-            "UCLAAlphaBeta": lambda _: __import__('bots.ucla_alpha_beta', fromlist=['UCLAAlphaBeta']).UCLAAlphaBeta("UCLA AlphaBeta"),
+            # "UCLAAlphaBeta": lambda _: __import__('bots.ucla_alpha_beta', fromlist=['UCLAAlphaBeta']).UCLAAlphaBeta("UCLA AlphaBeta"),
             # "MCTS_1s": lambda _: MCTSGAgent(name="MCTS_1s", time_limit=1),
             # "AlphaZero": lambda _: AlphaZeroAgent("AlphaZero", n_simulations=500),
             # "AlphaZero_1000": lambda _: AlphaZeroAgent("AlphaZero_1000", n_simulations=1000),

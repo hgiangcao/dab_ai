@@ -14,7 +14,15 @@ except ImportError:
     import numpy as _np
     from bots.mcts_heuristic import MCTS, Node
 
-from ucla_bot import UCLABot_v3
+try:
+    from agent_interface import BaseAgent
+except ImportError:
+    from bots.agent_interface import BaseAgent
+
+try:
+    from ucla_bot import UCLABot_v3
+except ImportError:
+    from bots.ucla_bot import UCLABot_v3
 
 class UCLAMCTSEngine(MCTS):
     """

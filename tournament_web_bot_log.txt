@@ -1,2 +1,4 @@
 Tournament: Local Bots vs Web Bot (N=20 games each, Sequential)
 ============================================================
+UCLABot_v4      | Wins: 9  | Losses: 11 | Draws: 0  | Win Rate: 0.45 | Avg Margin: -1.20
+UCLABot_v3      | Wins: 7  | Losses: 13 | Draws: 0  | Win Rate: 0.35 | Avg Margin: -2.10
