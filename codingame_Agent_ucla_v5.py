@@ -106,7 +106,15 @@ class UCLABot_v4(BaseAgent):
         self.move_queue: list = []
 
     def get_move(self, game) -> int:
-        if self.move_queue:
+        import numpy as np
+        if int(np.count_nonzero(game.l)) == 0:
+            self.move_queue.clear()
+
+        while self.move_queue:
+            mv = self.move_queue[0]
+            if game.l[mv] != 0:
+                self.move_queue.clear()
+                break
             return self.move_queue.pop(0)
         t_start = time.time()
         # First move of the whole game (no lines drawn yet) gets a much larger

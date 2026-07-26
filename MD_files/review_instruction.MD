@@ -1,54 +1,351 @@
-# AI Agent Instruction: AlphaZero Dots & Boxes Code Review
+# AlphaZero Code Review & Improvement Audit
 
-**Role:** Senior AI/ML Engineer and Code Reviewer.
-**Context:** Reviewing an AlphaZero implementation for the game "Dots and Boxes", focusing on the training pipeline, MCTS logic, and baseline bots.
-**Constraint:** Provide concise, actionable feedback. Do not explain standard algorithms. Provide exact code replacements for bugs.
+## Objective
 
-## 1. Game Environment (Dots & Boxes Specifics)
-*   **State Representation:** Verify the matrix correctly encodes horizontal edges, vertical edges, and box ownership.
-*   **Extra Turn Rule:** Ensure the turn-alternation logic accurately handles the rule where a player gets an extra turn after completing a box.
-*   **Action Space:** Verify illegal moves (already drawn lines) are strictly prohibited and flagged for masking.
-*   **Terminal States:** Check that rewards are strictly `[-1, 0, 1]` (Loss, Draw, Win) from the current player's perspective.
+Perform a comprehensive review of the AlphaZero implementation for **Dots and Boxes**. The objective is to identify implementation bugs, algorithmic weaknesses, performance bottlenecks, and opportunities to improve playing strength against strong opponents.
 
-## 2. Neural Network Architecture
-*   **Input Tensors:** Check input shape matches board state and current player perspective.
-*   **Action Masking:** Verify illegal move probabilities are set to `-inf` *before* the Softmax layer.
-*   **Heads:**
-    *   Policy Head: Output vector matches max edges, uses Softmax (sums to 1).
-    *   Value Head: Output scalar uses Tanh (bounded -1 to 1).
+The review should focus on correctness first, then efficiency, then playing strength.
 
-## 3. Replay Buffer & Data Generation
-*   **Tuple Structure:** Ensure buffer stores `(state, pi, z)` where `z` is the *final* game outcome.
-*   **Data Augmentation:** If using symmetries (rotations/reflections), verify both the board state and policy vector (`pi`) are transformed correctly.
-*   **Memory:** Verify sliding window (FIFO) implementation drops old data to prevent catastrophic forgetting.
+---
 
-## 4. Training Loop & Loss
-*   **Loss Function:** Verify combined loss: MSE (Value: `(z - v)^2`), Cross-Entropy (Policy: `pi^T * log(p)`), and L2 Weight Decay.
-*   **Target Alignment:** Check Cross-Entropy pairs MCTS visit probabilities (`pi`) as target and network policy (`p`) as prediction.
-*   **Perspective Flips:** Verify final reward (`z`) backpropagation to buffer states. The reward must invert *only* if the turn changed between steps (do not invert if an extra turn was granted).
-*   **Batching:** Ensure uniform sampling and shuffling.
+# 1. Architecture Verification
 
-## 5. MCTS (AlphaZero)
-*   **Terminal Nodes:** Verify terminal states immediately return actual outcomes and are *never* passed to the NN for expansion.
-*   **Selection (PUCB):** Verify UCB balances Q-values and prior probability `P` scaled by `c_puct` and visit counts.
-*   **Dirichlet Noise:** Ensure noise is added *only* to the root node's prior probabilities during self-play.
-*   **Temperature:** Verify visit counts are exponentiated by `1/tau` to calculate policy. `tau` must approach 0 later in games.
-*   **Value Backup:** Check value `v` is inverted (`-v`) during backup *unless* the player got an extra turn.
-*   **Tree Reuse:** If keeping trees between moves, verify the root updates correctly to the chosen child without memory leaks.
-*   **Q-Value Initialization:** Check unvisited nodes initialize to 0 (or parent's prior), not random values.
+Review the overall system architecture.
 
-## 6. Baseline Bots (Alpha-Beta & Heuristic MCTS)
-*   **Alpha-Beta Pruning:**
-    *   **Depth Management:** Ensure moves granting extra turns do not consume a depth layer prematurely.
-    *   **Pruning Condition:** Verify exact logic of `if alpha >= beta: break`.
-    *   **Minimax Alternation:** Ensure maximization/minimization accurately reflects the current player during consecutive extra turns.
-*   **Heuristic MCTS (Standard/Rollout):**
-    *   **Rollout Policy:** Check if simulation uses a heuristic (e.g., "always close a box if possible"). Purely random rollouts fail in Dots & Boxes.
-    *   **Backpropagation:** Verify rollout results update win/loss scores correctly up the tree, strictly respecting turn changes.
+Verify that the implementation follows the standard AlphaZero pipeline:
 
-## Output Format Requirements
-For every issue found, output:
-1.  **File Name & Lines:** Where the issue is located.
-2.  **Issue Type:** Critical Bug, Architecture Flaw, or Optimization Bottleneck.
-3.  **Description:** 1-2 sentence explanation of the flaw.
-4.  **Actionable Fix:** Exact code snippet to replace the faulty logic.
+```
+Self Play
+      ↓
+Replay Buffer
+      ↓
+Neural Network Training
+      ↓
+Model Evaluation
+      ↓
+Model Promotion
+      ↓
+Workers Update
+```
+
+Check for:
+
+* incorrect data flow
+* race conditions
+* stale model usage
+* replay synchronization issues
+* checkpoint consistency
+* distributed worker synchronization
+
+---
+
+# 2. Neural Network Review
+
+Review the neural network implementation.
+
+Verify:
+
+* input feature encoding
+* residual block implementation
+* policy head
+* value head
+* activation functions
+* normalization
+* output dimensions
+* weight initialization
+* forward propagation
+
+Determine whether the architecture is appropriate for 5×5 Dots and Boxes.
+
+Suggest improvements only if they are expected to provide measurable gains.
+
+---
+
+# 3. Training Pipeline Review
+
+Review the entire training procedure.
+
+Verify:
+
+* policy loss
+* value loss
+* total loss
+* optimizer
+* learning-rate scheduler
+* weight decay
+* gradient update
+* mixed precision (if applicable)
+* checkpoint saving/loading
+* batch construction
+
+Check for:
+
+* incorrect gradients
+* detached tensors
+* unnecessary CPU/GPU copies
+* inefficient dataloading
+* replay sampling bias
+
+---
+
+# 4. Replay Buffer Analysis
+
+Review replay generation.
+
+Evaluate:
+
+* replay diversity
+* replay freshness
+* replay capacity
+* sampling strategy
+* duplicate positions
+* opening diversity
+* game-length distribution
+
+Report whether replay saturation is occurring.
+
+Estimate whether replay data is sufficient to continue improving.
+
+---
+
+# 5. Self-Play Review
+
+Review self-play generation.
+
+Check:
+
+* temperature schedule
+* Dirichlet noise
+* resignation logic
+* move legality
+* terminal detection
+* value target generation
+* reward propagation
+
+Determine whether self-play is likely trapped in a local optimum.
+
+---
+
+# 6. MCTS Verification
+
+Perform a complete review of MCTS.
+
+Verify:
+
+Selection
+
+* PUCT formula
+* exploration term
+* prior normalization
+
+Expansion
+
+* legal action masking
+* policy normalization
+
+Simulation
+
+* terminal handling
+* network evaluation
+
+Backup
+
+* value propagation
+* player perspective inversion
+* visit counts
+* Q updates
+
+Root
+
+* Dirichlet noise
+* temperature sampling
+* move selection
+
+Check for implementation bugs.
+
+---
+
+# 7. Hyperparameter Analysis
+
+Evaluate whether current hyperparameters are appropriate.
+
+Include:
+
+* learning rate
+* batch size
+* epochs
+* replay size
+* replay history
+* simulations
+* c_puct
+* Dirichlet alpha
+* Dirichlet epsilon
+* temperature schedule
+* evaluation games
+* promotion threshold
+
+For every parameter provide:
+
+* current value
+* recommended range
+* expected impact
+* confidence level
+
+---
+
+# 8. Performance Profiling
+
+Identify computational bottlenecks.
+
+Measure:
+
+* self-play speed
+* MCTS simulations/sec
+* GPU utilization
+* CPU utilization
+* dataloader overhead
+* replay loading
+* network inference
+* training throughput
+
+Suggest optimizations with estimated speedup.
+
+---
+
+# 9. Playing Strength Analysis
+
+Determine why the model may improve against weak opponents while remaining weak against strong opponents.
+
+Analyze:
+
+* search quality
+* policy quality
+* value accuracy
+* tactical mistakes
+* strategic mistakes
+* opening diversity
+* endgame handling
+* chain strategy
+* sacrifice strategy
+
+Determine whether the bottleneck is:
+
+* neural network
+* MCTS
+* replay
+* evaluation
+* self-play
+* hyperparameters
+
+---
+
+# 10. Code Quality Review
+
+Review the codebase for:
+
+* correctness
+* readability
+* maintainability
+* modularity
+* duplicated logic
+* hidden bugs
+* numerical stability
+* thread safety
+* memory leaks
+* resource leaks
+
+Suggest refactoring where beneficial.
+
+---
+
+# 11. Experimental Recommendations
+
+Design experiments to isolate bottlenecks.
+
+Examples:
+
+* increase simulations
+* larger replay
+* different replay sampling
+* stronger opponents in self-play
+* different c_puct
+* different temperature schedule
+* different network size
+
+For each experiment include:
+
+* hypothesis
+* implementation effort
+* expected improvement
+* priority
+
+---
+
+# 12. Final Report
+
+Produce a structured report containing:
+
+## Executive Summary
+
+Overall implementation score (0–10)
+
+Expected playing strength
+
+Main bottlenecks
+
+Highest-priority improvements
+
+---
+
+## Critical Bugs
+
+List implementation bugs that must be fixed.
+
+Rank by severity.
+
+---
+
+## Performance Issues
+
+List computational bottlenecks.
+
+Estimate expected speedup after optimization.
+
+---
+
+## Playing Strength Issues
+
+Explain why the current implementation does not continue improving against stronger opponents.
+
+Identify the limiting factors.
+
+---
+
+## Improvement Roadmap
+
+Prioritize improvements into four categories:
+
+### Priority 1 (Immediate)
+
+High-impact, low-risk improvements.
+
+### Priority 2 (Short Term)
+
+Algorithmic improvements likely to increase playing strength.
+
+### Priority 3 (Medium Term)
+
+Architectural improvements.
+
+### Priority 4 (Research)
+
+Advanced techniques with uncertain payoff.
+
+For every recommendation provide:
+
+* expected Elo improvement (if estimable)
+* implementation complexity
+* confidence level
+* rationale
+
+Do not merely list possible improvements. Rank them by expected impact, explain why each recommendation matters, identify trade-offs, and distinguish confirmed issues from hypotheses that require experimental validation.

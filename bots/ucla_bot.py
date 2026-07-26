@@ -176,7 +176,15 @@ class UCLABot_v3(BaseAgent):
         self.move_queue = []
 
     def get_move(self, game) -> int:
-        if self.move_queue:
+        import numpy as np
+        if int(np.count_nonzero(game.l)) == 0:
+            self.move_queue.clear()
+
+        while self.move_queue:
+            mv = self.move_queue[0]
+            if game.l[mv] != 0:
+                self.move_queue.clear()
+                break
             return self.move_queue.pop(0)
             
         self.size = game.SIZE
@@ -717,8 +725,18 @@ class UCLAMCTSBot(BaseAgent):
     # ------------------------------------------------------------------
 
     def get_move(self, game) -> int:
+        # ── 0. Reset state on new game ───────────────────────────────────
+        import numpy as np
+        if int(np.count_nonzero(game.l)) == 0:
+            self._ucla.move_queue.clear()
+            self._first_turn = True
+
         # ── 1. Drain queued chain moves from the previous UCLA call ──────
-        if self._ucla.move_queue:
+        while self._ucla.move_queue:
+            mv = self._ucla.move_queue[0]
+            if game.l[mv] != 0:
+                self._ucla.move_queue.clear()
+                break
             return self._ucla.move_queue.pop(0)
 
         # ── 2. Forced bypass: captures available → UCLA is optimal ───────
