@@ -1,143 +1,215 @@
-import math
-import random
-import time
-import sys
-import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agent_interface import BaseAgent
-from bots.ucla_bot_heuristic import UCLAHeuristicEvaluator
+# ============================================================
+# MCTS ENGINE POWERED BY UCLABot_v3 ROLLOUT POLICY
+# ============================================================
 
-class Node:
-    __slots__ = ('parent', 'move', 'children', 'visits', 'value_sum', 'player_to_move', 'untried_moves', 'terminal')
+import math as _math
+import time as _time
+import random as _random
 
-    def __init__(self, parent, move, player_to_move, valid_moves, terminal):
-        self.parent = parent
-        self.move = move
-        self.children = []
-        self.visits = 0
-        self.value_sum = 0.0
-        self.player_to_move = player_to_move
-        self.terminal = terminal
-        self.untried_moves = valid_moves if valid_moves is not None else []
+try:
+    import numpy as _np
+    from mcts_heuristic import MCTS, Node
+except ImportError:
+    import numpy as _np
+    from bots.mcts_heuristic import MCTS, Node
 
-class UCLAMCTS(BaseAgent):
+from ucla_bot import UCLABot_v3
+
+class UCLAMCTSEngine(MCTS):
     """
-    MCTS that uses the UCLAHeuristicEvaluator for leaf node evaluation 
-    instead of random rollouts or neural networks.
+    Extends the base MCTS engine with:
+    - UCLABot_v3 as the rollout policy (replaces light heuristic rollout).
+    - UCLA-aware expansion ordering:  capture > safe-edge > safe-center > dangerous.
+    - PUCT bias derived from the UCLA move score so the tree leans toward
+      UCLA-preferred moves from the first simulation.
     """
-    def __init__(self, name: str = "UCLA MCTS", n_simulations: int = 1000, time_limit: float = 2.0, c_puct: float = 1.5, scale: float = 2000.0):
-        super().__init__(name)
-        self.n_simulations = n_simulations
-        self.time_limit = time_limit
-        self.c_puct = c_puct
-        self.scale = scale
-        self.evaluator = UCLAHeuristicEvaluator()
 
-    def get_move(self, game_state):
-        valid_moves = game_state.get_valid_moves()
-        if not valid_moves:
-            return -1
-            
-        # Order the initial moves using the heuristic evaluator
-        ordered_valid = self.evaluator.order_moves(game_state, valid_moves)
-            
-        root = Node(parent=None, move=None, player_to_move=game_state.current_player, 
-                    valid_moves=ordered_valid,
-                    terminal=not game_state.is_running())
-                    
-        simulations_done = 0
-        start_time = time.time()
-        
-        while True:
-            if self.time_limit is not None:
-                if time.time() - start_time >= self.time_limit:
-                    break
-            elif simulations_done >= self.n_simulations:
+    # ------------------------------------------------------------------
+    # Rollout: play out with UCLABot_v3 until terminal
+    # ------------------------------------------------------------------
+
+    def _rollout(self, s, rollout_player):
+        moves_made = 0
+        agent = UCLABot_v3()          # fresh agent per rollout (clean queue)
+
+        while s.is_running():
+            valid = s.get_valid_moves()
+            if not valid:
                 break
-                
-            simulations_done += 1
-            
-            node = root
-            moves_made = 0
-            
-            # SELECTION
-            while not node.untried_moves and node.children:
-                node = self._select_child(node)
-                game_state.execute_move(node.move)
-                moves_made += 1
-                
-            # EXPANSION
-            if node.untried_moves:
-                move = node.untried_moves.pop(0)
-                game_state.execute_move(move)
-                moves_made += 1
-                
-                terminal = not game_state.is_running()
-                if not terminal:
-                    valid_for_child = self.evaluator.order_moves(game_state, game_state.get_valid_moves())
-                else:
-                    valid_for_child = []
-                    
-                child = Node(parent=node, move=move, player_to_move=game_state.current_player,
-                             valid_moves=valid_for_child,
-                             terminal=terminal)
-                node.children.append(child)
-                node = child
-                
-            # LEAF EVALUATION (using heuristic instead of rollout)
-            if game_state.is_running():
-                raw_val = self.evaluator.evaluate(game_state, player=node.player_to_move)
-                # Normalize value to roughly [-1, 1] using tanh.
-                # UCLA heuristic gives roughly 1000 per box difference.
-                val = math.tanh(raw_val / self.scale)
-            else:
-                # terminal
-                my_boxes = int((game_state.b == node.player_to_move).sum())
-                opp_boxes = int((game_state.b == -node.player_to_move).sum())
-                if my_boxes > opp_boxes:
-                    val = 1.0
-                elif my_boxes < opp_boxes:
-                    val = -1.0
-                else:
-                    val = 0.0
-                
-            # BACKPROPAGATION
-            curr = node
-            while curr is not None:
-                curr.visits += 1
-                curr.value_sum += val
-                
-                if curr.parent is not None:
-                    # If the parent's turn player is different, the value is inverted
-                    if curr.parent.player_to_move != curr.player_to_move:
-                        val = -val
-                
-                curr = curr.parent
-                
-            # UNDO
-            for _ in range(moves_made):
-                game_state.undo_move()
-                
-        if root.children:
-            best_child = max(root.children, key=lambda c: c.visits)
-            return best_child.move
-        return ordered_valid[0]
 
-    def _select_child(self, node):
-        best_score = -float('inf')
-        best_child = None
-        log_n = math.log(node.visits) if node.visits > 0 else 0
-        
-        for child in node.children:
-            if child.visits == 0:
-                ucb = float('inf')
+            move = agent.get_move(s)
+
+            # Safety guard: if UCLABot_v3 returns something off-board
+            if move is None or move not in valid:
+                move = valid[0]
+
+            s.execute_move(move)
+            moves_made += 1
+
+        p1 = int(_np.sum(s.b == 1))
+        p2 = int(_np.sum(s.b == -1))
+        my  = p1 if rollout_player == 1 else p2
+        opp = p2 if rollout_player == 1 else p1
+        val = float(my - opp) / max(s.SIZE * s.SIZE, 1)
+
+        return val, moves_made
+
+    # ------------------------------------------------------------------
+    # Expansion ordering: capture → safe-edge → safe-center → dangerous
+    # ------------------------------------------------------------------
+
+    def _order_expansion_moves(self, s, valid_moves):
+        if not valid_moves:
+            return []
+
+        captures, safe_edge, safe_center, dangerous = [], [], [], []
+
+        for move in valid_moves:
+            is_capture = False
+            is_safe    = True
+
+            for box in s.get_boxes_of_line(move):
+                lines = s.get_lines_of_box(box)
+                drawn = sum(1 for ln in lines if s.l[ln] != 0)
+                if drawn == 3:
+                    is_capture = True
+                if drawn == 2:
+                    is_safe = False
+
+            if is_capture:
+                captures.append(move)
+            elif is_safe:
+                if len(s.get_boxes_of_line(move)) == 1:
+                    safe_edge.append(move)
+                else:
+                    safe_center.append(move)
             else:
-                q = child.value_sum / child.visits
-                if node.player_to_move != child.player_to_move:
-                    q = -q
-                ucb = q + self.c_puct * math.sqrt(log_n / child.visits)
-            if ucb > best_score:
-                best_score = ucb
-                best_child = child
-        return best_child
+                dangerous.append(move)
+
+        _random.shuffle(captures)
+        _random.shuffle(safe_edge)
+        _random.shuffle(safe_center)
+        _random.shuffle(dangerous)
+
+        return captures + safe_edge + safe_center + dangerous
+
+    # ------------------------------------------------------------------
+    # PUCT prior: higher bias for UCLA-preferred moves
+    # ------------------------------------------------------------------
+
+    def _evaluate_bias(self, s, move):
+        for box in s.get_boxes_of_line(move):
+            lines = s.get_lines_of_box(box)
+            drawn = sum(1 for ln in lines if s.l[ln] != 0)
+            if drawn == 3:
+                return 1.0          # guaranteed capture
+
+        is_safe = True
+        for box in s.get_boxes_of_line(move):
+            lines = s.get_lines_of_box(box)
+            drawn = sum(1 for ln in lines if s.l[ln] != 0)
+            if drawn == 2:
+                is_safe = False
+                break
+
+        if is_safe:
+            # Edge box (touches only 1 box) is slightly safer than center
+            return 0.4 if len(s.get_boxes_of_line(move)) == 1 else 0.3
+
+        return -0.3                 # dangerous (gifts 3-line box to opponent)
+
+
+# ============================================================
+# UCLAMCTSBot: Hybrid agent
+# ============================================================
+
+class UCLAMCTSBot(BaseAgent):
+    """
+    Hybrid Dots-and-Boxes agent combining UCLABot_v3 and MCTS.
+
+    Strategy
+    --------
+    1. **Forced bypass** — when 3-sided boxes are present, the capture
+       sequence is deterministic and UCLA-optimal.  We call UCLABot_v3
+       directly; MCTS cannot improve on it and would waste the time budget.
+
+    2. **MCTS** — for the opening and midgame, where strategic planning
+       (chain parity, sacrifice decisions) matters:
+       - Expansion ordered by UCLA priority (capture > safe > dangerous).
+       - Each simulation rollout is played by a fresh UCLABot_v3 instance,
+         giving expert-quality playout signals instead of random moves.
+       - UCB includes a per-move prior bias derived from the UCLA score.
+
+    Parameters
+    ----------
+    time_limit      : seconds per turn after the first (default 0.09 s).
+    first_turn_time : seconds for the very first turn (default 0.95 s).
+    c_puct          : UCB exploration constant (default 1.4).
+    """
+
+    def __init__(
+        self,
+        name: str = "UCLAMCTSBot",
+        time_limit: float = 0.09,
+        first_turn_time: float = 0.95,
+        c_puct: float = 1.4,
+    ):
+        super().__init__(name)
+        self.time_limit       = time_limit
+        self.first_turn_time  = first_turn_time
+        self.c_puct           = c_puct
+        self._first_turn      = True
+        self._ucla            = UCLABot_v3()   # persistent; preserves move_queue
+        # Diagnostics (last search)
+        self.last_simuls = 0
+        self.last_depth  = 0
+        self.last_time   = 0.0
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
+    def get_move(self, game) -> int:
+        # ── 1. Drain queued chain moves from the previous UCLA call ──────
+        if self._ucla.move_queue:
+            return self._ucla.move_queue.pop(0)
+
+        # ── 2. Forced bypass: captures available → UCLA is optimal ───────
+        if self._has_captures(game):
+            self.last_simuls = 0
+            self.last_depth  = 0
+            self.last_time   = 0.0
+            return self._ucla.get_move(game)
+
+        # ── 3. Strategic position → run MCTS ─────────────────────────────
+        tl = self.first_turn_time if self._first_turn else self.time_limit
+        self._first_turn = False
+
+        engine = UCLAMCTSEngine(time_limit=tl, c_puct=self.c_puct)
+        best_move, depth, simuls, t = engine.search(game)
+
+        self.last_simuls = simuls
+        self.last_depth  = depth
+        self.last_time   = t
+
+        if best_move is not None:
+            return best_move
+
+        # Final fallback (should be unreachable in normal play)
+        valid = game.get_valid_moves()
+        return valid[0] if valid else -1
+
+    # ------------------------------------------------------------------
+    # Helper
+    # ------------------------------------------------------------------
+
+    def _has_captures(self, game) -> bool:
+        """Return True if any box already has exactly 3 sides drawn."""
+        for r in range(game.SIZE):
+            for c in range(game.SIZE):
+                if game.b[r][c] == 0:
+                    lines = game.get_lines_of_box((r, c))
+                    if sum(1 for ln in lines if game.l[ln] != 0) == 3:
+                        return True
+        return False
