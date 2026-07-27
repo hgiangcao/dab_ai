@@ -180,7 +180,28 @@ class UCLABot_v3(BaseAgent):
         self.count = 0
         self.loop = False
 
-        self.makemove()
+        total_lines = int(np.count_nonzero(game.l))
+        if total_lines < 2:
+            min_r = (self.size - 2) // 2
+            max_r = min_r + 1
+            min_c = (self.size - 2) // 2
+            max_c = min_c + 1
+            center_moves = []
+            for r in range(min_r, max_r + 2):
+                for c in range(min_c, max_c + 1):
+                    if self.hedge[r][c] < 1:
+                        center_moves.append((1, r, c))
+            for r in range(min_r, max_r + 1):
+                for c in range(min_c, max_c + 2):
+                    if self.vedge[r][c] < 1:
+                        center_moves.append((2, r, c))
+            if center_moves:
+                zz, x, y = random.choice(center_moves)
+                self.takeedge(zz, x, y)
+            else:
+                self.makemove()
+        else:
+            self.makemove()
 
         if self.move_queue:
             return self.move_queue.pop(0)

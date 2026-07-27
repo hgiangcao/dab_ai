@@ -86,6 +86,12 @@ def create_agent(name: str, size: int):
     elif name == "UCLABot_v4":
         from bots.ucla_bot_v4 import UCLABot_v4
         return UCLABot_v4(name=name)
+    elif name == "UCLABot_v5":
+        from bots.ucla_bot_v5 import UCLABot_v5
+        return UCLABot_v5(name=name)
+    elif name == "UCLABot_v6":
+        from bots.ucla_bot_v6 import UCLABot_v6
+        return UCLABot_v6(name=name)
     elif name == "UCLAGreedyBot":
         from bots.ucla_bot_heuristic import UCLAGreedyBot
         return UCLAGreedyBot(name=name)
@@ -221,6 +227,8 @@ def main():
         # "UCLABot",
         # "UCLABot_v2",
         "UCLABot_v3",
+        "UCLABot_v5",
+        "UCLABot_v6",
         # "UCLABot_v4",   
         # "UCLAGreedyBot",
         # "UCLAAlphaBeta",
@@ -228,8 +236,8 @@ def main():
         # "UCLA_MCTS_200",
         # "SimpleBot",
         # "SimpleBot_v2",
-        "UCLA_MCTS_0.1",
-        "UCLA_MCTS_0.2",
+        # "UCLA_MCTS_0.1",
+        # "UCLA_MCTS_0.2",
     ]
     n_agents = len(agent_names)
     
