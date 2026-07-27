@@ -91,17 +91,17 @@ def startup_event():
                     new_lines.append(line)
             # If finish_pretrain is not present, add it
             if not any(line.startswith("finish_pretrain:") for line in lines):
-                new_lines.append("finish_pretrain: False")
+                new_lines.append("finish_pretrain: True")
             VERSION_FILE.write_text("\n".join(new_lines) + "\n")
         else:
-            VERSION_FILE.write_text("run: run_1\nlast_updated_model: 0\ncurrent_phase: 0\nfinish_pretrain: False\n")
+            VERSION_FILE.write_text("run: run_1\nlast_updated_model: 0\ncurrent_phase: 0\nfinish_pretrain: True\n")
 
 # --------------------------------------------------------
 # Helper
 # --------------------------------------------------------
 
 def get_version_info():
-    info = {"run": "run_1", "last_updated_model": "0", "current_phase": "0", "finish_pretrain": "False"}
+    info = {"run": "run_1", "last_updated_model": "0", "current_phase": "0", "finish_pretrain": "True"}
     if VERSION_FILE.exists():
         for line in VERSION_FILE.read_text().splitlines():
             if ":" in line:

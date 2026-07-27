@@ -167,7 +167,7 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
         # with a backstop of 20 iterations so training never stalls forever.
         phase_iterations = iteration % 30  # rough estimate of iters spent in current phase
         threshold = config.PHASE_ADVANCE_THRESHOLD.get(current_phase, 0.60)
-        if (max_client_winrate >= threshold or phase_iterations == 0) and current_phase < len(config.PHASES_CONFIG) - 2:
+        if (max_client_winrate >= threshold ) and current_phase < len(config.PHASES_CONFIG) - 1:
             reason = f"Winrate {max_client_winrate:.1%} >= {threshold:.0%}" if max_client_winrate >= threshold else "Max phase iterations reached"
             print(f"\n===========================================================")
             print(f"Phase {current_phase} cleared ({reason})!")
@@ -300,17 +300,17 @@ def training_loop():
     dummy_game = DotsAndBoxesGame(size=5)
     global_nnet = NNetWrapper(dummy_game, train_args)
 
-    # ── Supervised pretraining from bot game logs (runs once, skipped on restart) ──
+    # ── Supervised pretraining disabled ──
     print("\n" + "=" * 60)
-    print("PHASE 0: SUPERVISED PRETRAINING FROM BOT GAME LOGS")
+    print("PHASE 0: PRETRAINING DISABLED - STARTING FROM SCRATCH")
     print("=" * 60)
-    did_pretrain = run_pretraining(global_nnet, log_dir, writer)
-    if did_pretrain:
-        print("[Pretrain] Pretraining complete. Proceeding to AlphaZero self-play.\n")
-    else:
-        print("[Pretrain] Pretraining skipped. Using existing weights.\n")
+    # did_pretrain = run_pretraining(global_nnet, log_dir, writer)
+    # if did_pretrain:
+    #     print("[Pretrain] Pretraining complete. Proceeding to AlphaZero self-play.\n")
+    # else:
+    #     print("[Pretrain] Pretraining skipped. Using existing weights.\n")
         
-    # Signal to workers that pretraining is done
+    # Signal to workers that pretraining is done (or not needed)
     model_manager.set_pretrain_finished()
 
     
