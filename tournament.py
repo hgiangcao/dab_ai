@@ -104,12 +104,18 @@ def create_agent(name: str, size: int):
     elif name == "UCLA_MCTS_0.2":
         from bots.ucla_mcts import UCLAMCTSBot
         return UCLAMCTSBot(name=name, time_limit=0.2)
+    elif name == "UCLA_MCTS_0.5":
+        from bots.ucla_mcts import UCLAMCTSBot
+        return UCLAMCTSBot(name=name, time_limit=0.5)
     elif name == "SimpleBot":
         from bots.simple_bot import SimpleBot
         return SimpleBot(name=name)
     elif name == "SimpleBot_v2":
         from bots.simple_bot_v2 import SimpleBot_v2
         return SimpleBot_v2(name=name)
+    elif name == "ARM_bot":
+        from bots.arm_bot import ArmandoBot
+        return ArmandoBot(name=name, ply=2)
     else:
         raise ValueError(f"Unknown agent name: {name}")
 
@@ -213,7 +219,7 @@ def main():
     agent_names = [
         # "Random", 
         "Greedy", 
-        "Greedy Chain",
+        # "Greedy Chain",
         # "Alpha-Beta (0.1s)", 
         # "Alpha-Beta (0.5s)", 
         # "Alpha-Beta v1 (0.1s)",
@@ -227,7 +233,7 @@ def main():
         # "UCLABot",
         # "UCLABot_v2",
         "UCLABot_v3",
-        "UCLABot_v4",
+        # "UCLABot_v4",
         # "UCLABot_v6",
         # "UCLABot_v4",   
         # "UCLAGreedyBot",
@@ -236,9 +242,11 @@ def main():
         # "UCLA_MCTS_200",
         # "SimpleBot",
         # "SimpleBot_v2",
-        "UCLA_MCTS_0.1",
-        "UCLA_MCTS_0.5",
-        "UCLA_MCTS_0.2",
+        # "UCLA_MCTS_0.1",
+        # "UCLA_MCTS_0.5",
+        # "UCLA_MCTS_0.2",
+        "ARM_bot"
+
     ]
     n_agents = len(agent_names)
     
