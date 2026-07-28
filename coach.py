@@ -115,13 +115,13 @@ def build_worker_chunks(
 
 def worker_execute_episode(worker_args):
     """Compatibility wrapper for code that still submits one episode per task."""
-    game_size, latest_model_path, mcts_class, args, game_sequence, start_fill_pct, opp_type, opp_path = worker_args
+    game_size, latest_model_path, mcts_class, args, start_fill_pct, opp_type, opp_path = worker_args
     results = worker_execute_episode_chunk((
         game_size,
         latest_model_path,
         mcts_class,
         args,
-        [(game_sequence, start_fill_pct, opp_type, opp_path)],
+        [(start_fill_pct, opp_type, opp_path)],
     ))
     return results[0]
 
@@ -260,7 +260,7 @@ def worker_execute_episode_chunk(worker_args):
         opponent_cache[key] = agent_opp
         return agent_opp
 
-    def run_episode(game_sequence, start_fill_pct, opp_type, opp_path):
+    def run_episode(start_fill_pct, opp_type, opp_path):
         if opp_type in ["best", "past"] and opp_path is None:
             opp_type = "self"
 
@@ -280,10 +280,18 @@ def worker_execute_episode_chunk(worker_args):
         mcts_latest.reset_tree()
         last_action_for_mcts = None  # tracks last move played so tree can be advanced
 
-        # Reverse Curriculum Logic: Pre-fill the board using the historical log sequence.
-        if game_sequence is not None and start_fill_pct >= 0.001:
-            target_move_index = int(len(game_sequence) * start_fill_pct)
-            for move in game_sequence[:target_move_index]:
+        # Reverse Curriculum: Pre-fill the board via a FillBot vs FillBot game
+        # up to start_fill_pct of total lines, producing a naturally reachable state.
+        if start_fill_pct >= 0.001:
+            from bots.fill_bot import FillBot
+            fill_bot_a = FillBot()
+            fill_bot_b = FillBot()
+            target_lines = int(game.N_LINES * start_fill_pct)
+            while int(np.count_nonzero(game.l)) < target_lines and game.is_running():
+                bot = fill_bot_a if game.current_player == 1 else fill_bot_b
+                move = bot.get_move(game)
+                if move is None:
+                    break
                 game.execute_move(move)
             # Pre-fill moves are not from MCTS — start fresh from this position
             last_action_for_mcts = None
@@ -453,27 +461,6 @@ class AlphaZeroTrainer:
         self.phase_decisive = 0
         self.iterations_in_current_phase = 0
         
-        # Load Reverse Curriculum Logs
-        self.json_logs = []
-        log_path = "game_logs.jsonl"
-        expected_moves = 2 * self.game_size * (self.game_size + 1)
-        if os.path.exists(log_path):
-            with open(log_path, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            record = json.loads(line)
-                            moves = record.get("moves", [])
-                            # Only load games that match our current board size exactly
-                            if moves and len(moves) == expected_moves:
-                                # Store as int8 (0-127 range covers all line indices)
-                                # Saves ~28x RAM vs Python list-of-ints (1 byte vs 28 bytes per move)
-                                self.json_logs.append(np.array(moves, dtype=np.int8))
-                        except Exception:
-                            pass
-        print(f"Loaded {len(self.json_logs)} historical game sequences of size {self.game_size}x{self.game_size} for Reverse Curriculum.")
-        
         # TensorBoard logging setup
         os.makedirs(self.args.checkpoint_dir, exist_ok=True)
         from torch.utils.tensorboard import SummaryWriter
@@ -525,7 +512,7 @@ class AlphaZeroTrainer:
             total_prob = sum(p for _, p in current_pool)
             normalized_probs = [p / total_prob for _, p in current_pool]
             
-            for seq in sampled_sequences:
+            for _ in range(self.args.num_eps):
                 opp_type = np.random.choice([name for name, _ in current_pool], p=normalized_probs)
                 opp_path = None
                 
@@ -536,7 +523,7 @@ class AlphaZeroTrainer:
                     opp_path = random.choice(past_checkpoints) if past_checkpoints else None
                     if opp_path is None: opp_type = "self"
                     
-                episode_specs.append((seq, start_fill_pct, opp_type, opp_path))
+                episode_specs.append((start_fill_pct, opp_type, opp_path))
             
             # 1. Self-Play (Parallelized)
             print(f"------------ Self-Play (Fill: {start_fill_pct*100:.1f}%) ------------")

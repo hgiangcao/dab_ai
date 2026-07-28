@@ -114,10 +114,10 @@ class NNetWrapper:
 
         self.nnet = DotsAndBoxesNet(self.board_x, self.action_size, args).to(self.device)
         self.optimizer = optim.Adam(self.nnet.parameters(), lr=args.lr, weight_decay=args.l2_reg)
-        # CosineAnnealingLR: decays LR from args.lr down to 1e-5 over T_max scheduler steps
+        # CosineAnnealingLR: decays LR from args.lr down to 5e-5 over T_max scheduler steps
         T_max = args.get('lr_scheduler_steps', 300) if hasattr(args, 'get') else getattr(args, 'lr_scheduler_steps', 300)
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=T_max, eta_min=1e-5
+            self.optimizer, T_max=T_max, eta_min=5e-5
         )
 
     def train(self, examples, epochs=None):
