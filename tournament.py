@@ -222,7 +222,7 @@ def main():
     agent_names = [
         "Random", 
         "Greedy", 
-        # "Greedy Chain",
+        "Greedy Chain",
         # "Alpha-Beta (0.1s)", 
         # "Alpha-Beta (0.5s)", 
         # "Alpha-Beta v1 (0.1s)",
@@ -247,7 +247,7 @@ def main():
         # "SimpleBot_v2",
         # "UCLA_MCTS_0.1",
         # "UCLA_MCTS_0.5",
-        # "UCLA_MCTS_0.2",
+        "UCLA_MCTS_0.2",
         # "ARM_bot",
         "fill_bot"
 

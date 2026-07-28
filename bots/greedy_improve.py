@@ -2,6 +2,14 @@ import random
 from agent_interface import BaseAgent
 
 class GreedyChainPlayer(BaseAgent):
+    """
+    Improved greedy Dots and Boxes player that considers chain penalties.
+
+    Speed improvements:
+    * box_fill_count[] used for counting captured boxes, chains, and evaluating danger.
+    * line_to_boxes used instead of get_boxes_of_line().
+    * Eliminated Numpy flatten operations and repetitive list creations.
+    """
 
     def __init__(self, name="Greedy Chain Bot"):
         super().__init__(name)
@@ -14,8 +22,11 @@ class GreedyChainPlayer(BaseAgent):
         best_score = -10**9
         best_moves = []
 
+        fill = s.box_fill_count
+        ltb = s.line_to_boxes
+
         for move in moves:
-            score = self.evaluate_move(s, move)
+            score = self.evaluate_move(s, move, fill, ltb)
             if score > best_score:
                 best_score = score
                 best_moves = [move]
@@ -24,14 +35,14 @@ class GreedyChainPlayer(BaseAgent):
 
         return random.choice(best_moves)
 
-    def evaluate_move(self, s, move):
+    def evaluate_move(self, s, move, fill, ltb):
         score = 0
-        before = self.count_boxes(s)
+        before = self.count_boxes(fill)
         player_before = s.current_player
 
         s.execute_move(move)
         try:
-            after = self.count_boxes(s)
+            after = self.count_boxes(fill)
             captured = after - before
 
             # 1. Reward capture
@@ -40,11 +51,11 @@ class GreedyChainPlayer(BaseAgent):
             # 2. Simulate full opponent capture chain
             opponent_gain = 0
             if s.current_player != player_before:
-                opponent_gain = self._count_giveaway(s)
+                opponent_gain = self._count_giveaway(s, fill, ltb)
             score -= opponent_gain * 1000
 
             # 3. Chain penalty
-            chain_count = self.count_chains(s)
+            chain_count = self.count_chains(fill)
             score -= chain_count * 100
 
             # 4. Safe position
@@ -53,9 +64,8 @@ class GreedyChainPlayer(BaseAgent):
 
             # 5. Very safe position (no 2-edge boxes created)
             has_2_edge_box = False
-            for box in s.get_boxes_of_line(move):
-                filled = sum(1 for ln in s.get_lines_of_box(box) if s.l[ln] != 0)
-                if filled == 2:
+            for bidx in ltb[move]:
+                if fill[bidx] == 2:
                     has_2_edge_box = True
                     break
             if opponent_gain == 0 and not has_2_edge_box:
@@ -66,41 +76,33 @@ class GreedyChainPlayer(BaseAgent):
 
         return score
 
-    def count_boxes(self, s):
-        return sum(1 for x in s.b.flatten() if x != 0)
+    def count_boxes(self, fill):
+        return sum(1 for f in fill if f == 4)
 
-    def count_chains(self, s):
+    def count_chains(self, fill):
         """
         Count boxes with 2 or 3 edges.
         More 2 or 3-edge boxes means dangerous chains.
         """
-        count = 0
-        for r in range(s.SIZE):
-            for c in range(s.SIZE):
-                if s.b[r][c] == 0:
-                    lines = s.get_lines_of_box((r, c))
-                    filled = sum(1 for ln in lines if s.l[ln] != 0)
-                    if filled >= 2:
-                        count += 1
-        return count
+        return sum(1 for f in fill if f == 2 or f == 3)
 
-    def _creates_box(self, s, move):
-        for box in s.get_boxes_of_line(move):
-            lines = s.get_lines_of_box(box)
-            if sum(1 for ln in lines if s.l[ln] != 0) == 3:
-                return True
-        return False
-
-    def _count_giveaway(self, s):
+    def _count_giveaway(self, s, fill, ltb):
         moves_made = []
         try:
             while True:
-                caps = [m for m in s.get_valid_moves() if self._creates_box(s, m)]
-                if not caps:
+                cap = -1
+                for m in s.get_valid_moves():
+                    for bidx in ltb[m]:
+                        if fill[bidx] == 3:
+                            cap = m
+                            break
+                    if cap != -1:
+                        break
+                
+                if cap == -1:
                     break
-                m = caps[0]
-                s.execute_move(m)
-                moves_made.append(m)
+                s.execute_move(cap)
+                moves_made.append(cap)
         finally:
             for m in reversed(moves_made):
                 s.undo_move()

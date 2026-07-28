@@ -1,6 +1,5 @@
-
 # ============================================================
-# MCTS ENGINE POWERED BY UCLABot_v3 ROLLOUT POLICY
+# MCTS ENGINE POWERED BY UCLABot_v6 ROLLOUT POLICY
 # ============================================================
 
 import math as _math
@@ -20,26 +19,31 @@ except ImportError:
     from bots.agent_interface import BaseAgent
 
 try:
-    from ucla_bot import UCLABot_v3
+    from ucla_bot_v6 import UCLABot_v6
 except ImportError:
-    from bots.ucla_bot import UCLABot_v3
+    from bots.ucla_bot_v6 import UCLABot_v6
 
 class UCLAMCTSEngine(MCTS):
     """
     Extends the base MCTS engine with:
-    - UCLABot_v3 as the rollout policy (replaces light heuristic rollout).
+    - UCLABot_v6 as the rollout policy (replaces light heuristic rollout).
     - UCLA-aware expansion ordering:  capture > safe-edge > safe-center > dangerous.
     - PUCT bias derived from the UCLA move score so the tree leans toward
       UCLA-preferred moves from the first simulation.
     """
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._rollout_bot = UCLABot_v6()
+
     # ------------------------------------------------------------------
-    # Rollout: play out with UCLABot_v3 until terminal
+    # Rollout: play out with UCLABot_v6 until terminal
     # ------------------------------------------------------------------
 
     def _rollout(self, s, rollout_player):
         moves_made = 0
-        agent = UCLABot_v3()          # fresh agent per rollout (clean queue)
+        agent = self._rollout_bot
+        agent.move_queue.clear()      # fresh agent state per rollout
 
         while s.is_running():
             valid = s.get_valid_moves()
@@ -48,7 +52,7 @@ class UCLAMCTSEngine(MCTS):
 
             move = agent.get_move(s)
 
-            # Safety guard: if UCLABot_v3 returns something off-board
+            # Safety guard: if UCLABot_v6 returns something off-board
             if move is None or move not in valid:
                 move = valid[0]
 
@@ -72,14 +76,16 @@ class UCLAMCTSEngine(MCTS):
             return []
 
         captures, safe_edge, safe_center, dangerous = [], [], [], []
+        fill = s.box_fill_count
+        ltb = s.line_to_boxes
 
         for move in valid_moves:
             is_capture = False
             is_safe    = True
 
-            for box in s.get_boxes_of_line(move):
-                lines = s.get_lines_of_box(box)
-                drawn = sum(1 for ln in lines if s.l[ln] != 0)
+            boxes = ltb[move]
+            for bidx in boxes:
+                drawn = fill[bidx]
                 if drawn == 3:
                     is_capture = True
                 if drawn == 2:
@@ -88,7 +94,7 @@ class UCLAMCTSEngine(MCTS):
             if is_capture:
                 captures.append(move)
             elif is_safe:
-                if len(s.get_boxes_of_line(move)) == 1:
+                if len(boxes) == 1:
                     safe_edge.append(move)
                 else:
                     safe_center.append(move)
@@ -107,23 +113,22 @@ class UCLAMCTSEngine(MCTS):
     # ------------------------------------------------------------------
 
     def _evaluate_bias(self, s, move):
-        for box in s.get_boxes_of_line(move):
-            lines = s.get_lines_of_box(box)
-            drawn = sum(1 for ln in lines if s.l[ln] != 0)
-            if drawn == 3:
+        fill = s.box_fill_count
+        boxes = s.line_to_boxes[move]
+
+        for bidx in boxes:
+            if fill[bidx] == 3:
                 return 1.0          # guaranteed capture
 
         is_safe = True
-        for box in s.get_boxes_of_line(move):
-            lines = s.get_lines_of_box(box)
-            drawn = sum(1 for ln in lines if s.l[ln] != 0)
-            if drawn == 2:
+        for bidx in boxes:
+            if fill[bidx] == 2:
                 is_safe = False
                 break
 
         if is_safe:
             # Edge box (touches only 1 box) is slightly safer than center
-            return 0.4 if len(s.get_boxes_of_line(move)) == 1 else 0.3
+            return 0.4 if len(boxes) == 1 else 0.3
 
         return -0.3                 # dangerous (gifts 3-line box to opponent)
 
@@ -134,18 +139,18 @@ class UCLAMCTSEngine(MCTS):
 
 class UCLAMCTSBot(BaseAgent):
     """
-    Hybrid Dots-and-Boxes agent combining UCLABot_v3 and MCTS.
+    Hybrid Dots-and-Boxes agent combining UCLABot_v6 and MCTS.
 
     Strategy
     --------
     1. **Forced bypass** — when 3-sided boxes are present, the capture
-       sequence is deterministic and UCLA-optimal.  We call UCLABot_v3
+       sequence is deterministic and UCLA-optimal.  We call UCLABot_v6
        directly; MCTS cannot improve on it and would waste the time budget.
 
     2. **MCTS** — for the opening and midgame, where strategic planning
        (chain parity, sacrifice decisions) matters:
        - Expansion ordered by UCLA priority (capture > safe > dangerous).
-       - Each simulation rollout is played by a fresh UCLABot_v3 instance,
+       - Each simulation rollout is played by a fresh UCLABot_v6 instance,
          giving expert-quality playout signals instead of random moves.
        - UCB includes a per-move prior bias derived from the UCLA score.
 
@@ -168,7 +173,7 @@ class UCLAMCTSBot(BaseAgent):
         self.first_turn_time  = first_turn_time
         self.c_puct           = c_puct
         self._first_turn      = True
-        self._ucla            = UCLABot_v3()   # persistent; preserves move_queue
+        self._ucla            = UCLABot_v6()   # persistent; preserves move_queue
         # Diagnostics (last search)
         self.last_simuls = 0
         self.last_depth  = 0
@@ -214,10 +219,7 @@ class UCLAMCTSBot(BaseAgent):
 
     def _has_captures(self, game) -> bool:
         """Return True if any box already has exactly 3 sides drawn."""
-        for r in range(game.SIZE):
-            for c in range(game.SIZE):
-                if game.b[r][c] == 0:
-                    lines = game.get_lines_of_box((r, c))
-                    if sum(1 for ln in lines if game.l[ln] != 0) == 3:
-                        return True
+        for drawn in game.box_fill_count:
+            if drawn == 3:
+                return True
         return False

@@ -19,32 +19,36 @@ from bots.alpha_beta import AlphaBetaPlayer
 from bots.mcts_x import MCTSGAgent
 from bots.greedy import GreedyPlayer
 from bots.greedy_improve import GreedyChainPlayer
-from bots.ucla_bot import UCLABot, UCLABot_v2, UCLABot_v3, UCLABot_MCTS
+from bots.ucla_bot import UCLABot, UCLABot_v2, UCLABot_v3
+
 from bots.ucla_bot_v4 import UCLABot_v4
 from web_gui_game import RandomBot, AlphaZeroAgent
+from tournament import create_agent
+
 
 class WebTournament:
     def __init__(self, size=5, n_games=20):
         self.size = size
         self.n_games = n_games
         
-        self.agent_registry = {
-            # "Random": lambda _: RandomBot("Random"),
-            # "Greedy": lambda _: GreedyPlayer("Greedy"),
-            # "GreedyChain": lambda _: GreedyChainPlayer("GreedyChain"),
-            # "AlphaBeta_1s": lambda _: AlphaBetaPlayer(name="AlphaBeta_1s", time_limit=1),
-            # "AlphaBeta_10s": lambda _: AlphaBetaPlayer(name="AlphaBeta_10s", time_limit=10.0),
-            # "UCLABot": lambda _: UCLABot("UCLA JS Bot"),
-            # "UCLABot_v2": lambda _: UCLABot_v2("UCLA JS Bot v2"),
-            "UCLABot_v4": lambda _: UCLABot_v4("UCLA JS Bot v4"),
-            "UCLABot_v3": lambda _: UCLABot_v3("UCLA JS Bot v3"),
-            "UCLABot_MCTS": lambda _: UCLABot_MCTS("UCLA JS Bot MCTS"),
-            # "UCLAGreedyBot": lambda _: __import__('bots.ucla_bot_heuristic', fromlist=['UCLAGreedyBot']).UCLAGreedyBot("UCLA Greedy"),
-            # "UCLAAlphaBeta": lambda _: __import__('bots.ucla_alpha_beta', fromlist=['UCLAAlphaBeta']).UCLAAlphaBeta("UCLA AlphaBeta"),
-            # "MCTS_1s": lambda _: MCTSGAgent(name="MCTS_1s", time_limit=1),
-            # "AlphaZero": lambda _: AlphaZeroAgent("AlphaZero", n_simulations=500),
-            # "AlphaZero_1000": lambda _: AlphaZeroAgent("AlphaZero_1000", n_simulations=1000),
-        }
+        self.agent_names = [
+            # "Random", 
+            # "Greedy", 
+            # "Greedy Chain",
+            # "AlphaBeta_1s",
+            # "AlphaBeta_10s",
+            # "UCLABot",
+            # "UCLABot_v2",
+            # "UCLABot_v4",
+            "UCLABot_v6",
+            "UCLABot_v3",
+            # "UCLA_MCTS_0.2",
+            # "UCLAGreedyBot",
+            # "UCLAAlphaBeta",
+            # "MCTS_1s",
+            # "AlphaZero",
+            # "AlphaZero_1000",
+        ]
         
         # Thread safety utilities
         self.thread_local = threading.local()
@@ -106,14 +110,21 @@ class WebTournament:
             self.reset_web_game(driver)
             time.sleep(0.5) # Wait for DOM to fully load
             
-            game = DotsAndBoxesGame(size=self.size, starting_player=1)
+            # Alternate who starts based on game index
+            starting_player = 1 if (game_idx % 2 == 0) else -1
+            game = DotsAndBoxesGame(size=self.size, starting_player=starting_player)
             
             try:
-                local_agent = self.agent_registry[bot_name](bot_name)
+                local_agent = create_agent(bot_name, self.size)
             except Exception as e:
                 return bot_name, game_idx, "Error", 0
                 
             drawn_on_web = set()
+            
+            # If web bot plays first, trigger its move
+            if starting_player == -1:
+                driver.execute_script("player=0; makemove();")
+
             
             while game.is_running():
                 if game.current_player == 1:
@@ -195,13 +206,13 @@ class WebTournament:
 
     def run_tournament(self, specific_bot=None):
         if specific_bot:
-            if specific_bot in self.agent_registry:
-                self.agent_registry = {specific_bot: self.agent_registry[specific_bot]}
+            if specific_bot in self.agent_names:
+                self.agent_names = [specific_bot]
             else:
                 print(f"Bot '{specific_bot}' not found in registry.")
                 return
                 
-        results = {bot: {"Wins": 0, "Losses": 0, "Draws": 0, "TotalMargin": 0} for bot in self.agent_registry}
+        results = {bot: {"Wins": 0, "Losses": 0, "Draws": 0, "TotalMargin": 0} for bot in self.agent_names}
         
         log_file = open("tournament_web_bot_log.txt", "w")
         log_file.write(f"Tournament: Local Bots vs Web Bot (N={self.n_games} games each, Sequential)\n")
@@ -211,16 +222,16 @@ class WebTournament:
         
         # Prepare all match tasks
         tasks = []
-        for bot_name in self.agent_registry.keys():
+        for bot_name in self.agent_names:
             for i in range(self.n_games):
                 tasks.append((bot_name, i))
                 
         # Initialize tqdm for each bot
         pbars = {}
-        for i, bot_name in enumerate(self.agent_registry.keys()):
+        for i, bot_name in enumerate(self.agent_names):
             pbars[bot_name] = tqdm(total=self.n_games, desc=f"{bot_name[:15]:<15}", position=i, leave=True)
             
-        bot_games_played = {bot: 0 for bot in self.agent_registry}
+        bot_games_played = {bot: 0 for bot in self.agent_names}
                 
         # Execute tasks sequentially
         for bot_name, game_idx in tasks:
@@ -245,7 +256,7 @@ class WebTournament:
             except Exception as e:
                 tqdm.write(f"Exception in game {bot_name} {game_idx}: {e}")
                     
-        print("\n" * len(self.agent_registry)) # Clear lines so following prints don't overwrite pbars
+        print("\n" * len(self.agent_names)) # Clear lines so following prints don't overwrite pbars
                     
         # Cleanup drivers
         with self.driver_lock:

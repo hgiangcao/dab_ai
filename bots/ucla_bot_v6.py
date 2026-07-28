@@ -2,444 +2,490 @@ import random
 from agent_interface import BaseAgent
 
 
+# ---------------------------------------------------------------------------
+# Static board topology — built once per board size, cached globally
+# ---------------------------------------------------------------------------
+
+_TABLE_CACHE: dict = {}
+
+
+def _build_tables(size):
+    """
+    Precompute adjacency tables for a Dots-and-Boxes board of given size.
+
+    Line indexing (same as DotsAndBoxesGame):
+      horizontal: index = row*size + col   (row in 0..size, col in 0..size-1)
+      vertical:   index = half + col*size + row  (col in 0..size, row in 0..size-1)
+      where half = N_LINES // 2 = size*(size+1)
+
+    Returns
+    -------
+    adj_boxes : list[tuple[int]]  — adj_boxes[edge] = 1 or 2 box-indices
+    adj_edges : list[tuple[int]]  — adj_edges[box]  = 4 edge-indices
+    n_lines   : int
+    n_boxes   : int
+    """
+    n_lines = 2 * size * (size + 1)
+    half    = n_lines // 2
+    n_boxes = size * size
+
+    adj_boxes = []
+    for line in range(n_lines):
+        if line < half:                      # horizontal
+            i = line // size
+            j = line  % size
+            if i == 0:
+                boxes = (i * size + j,)
+            elif i == size:
+                boxes = ((i - 1) * size + j,)
+            else:
+                boxes = ((i - 1) * size + j, i * size + j)
+        else:                                # vertical
+            vl = line - half
+            j  = vl // size
+            i  = vl  % size
+            if j == 0:
+                boxes = (i * size + j,)
+            elif j == size:
+                boxes = (i * size + j - 1,)
+            else:
+                boxes = (i * size + j - 1, i * size + j)
+        adj_boxes.append(boxes)
+
+    adj_edges = []
+    for box_idx in range(n_boxes):
+        i = box_idx // size
+        j = box_idx  % size
+        top    = i * size + j
+        bottom = (i + 1) * size + j
+        left   = half + j * size + i
+        right  = half + (j + 1) * size + i
+        adj_edges.append((top, bottom, left, right))
+
+    return adj_boxes, adj_edges, n_lines, n_boxes
+
+
+def _get_tables(size):
+    if size not in _TABLE_CACHE:
+        _TABLE_CACHE[size] = _build_tables(size)
+    return _TABLE_CACHE[size]
+
+
 class UCLABot_v6(BaseAgent):
     """
-    Bitboard port of UCLABot_v3's full chain-rule strategy.
+    UCLABot_v3 strategy with true algorithmic optimisations.
 
-    Decision logic is IDENTICAL to v3 (safe-3rd-edge captures, chain/loop
-    detection with double-cross sacrifice, singleton/doubleton avoidance,
-    randomized safe-move search, fallback any-move). The only thing that
-    changed is the state representation:
+    Key improvements over the previous bitboard version
+    ---------------------------------------------------
+    1. box_fill_count[] is read DIRECTLY from the game object — the game
+       already maintains it incrementally via execute_move(). No per-call
+       rebuild.
 
-      - v3 keeps hedge[][] / vedge[][] / box[][] as Python lists, rebuilt
-        with nested loops every get_move() call, with box[][] counts
-        incremented by hand inside sethedge/setvedge.
+    2. three_edge_set — Python set of flat box-indices with fill == 3.
+       sides3() / takeall3s() are now O(1) / O(k) instead of scanning
+       all 25 boxes every time.
 
-      - v6 keeps a single integer `state_bb` (bit i set <=> line i taken).
-        "Is edge (i,j) taken?" becomes a single bit test (hset/vset), and
-        "how many edges does box (i,j) have?" becomes
-        (state_bb & BOX_MASKS[box]).bit_count() - an O(1) popcount, so
-        there's no per-move bookkeeping of box counts at all; they're
-        always derived directly and cheaply from state_bb.
+    3. safe_edges — Python set of free edge-indices whose placement does NOT
+       raise any adjacent box to fill == 3 (would gift a capture to the
+       opponent). sides01() picks uniformly at random from this set in O(1).
+
+    4. Both sets are updated INCREMENTALLY inside _place_edge(): only the
+       1-2 boxes adjacent to the placed edge are touched — no full-board scan.
+
+    5. Flat bool list edge_taken[] replaces hset()/vset() method-call overhead.
+
+    6. Precomputed adj_boxes[] / adj_edges[] replace all (i,j) coordinate math
+       in the hot path.
+
+    Strategy is identical to UCLABot_v3 (takesafe3s → sides3/sides01 →
+    singleton → doubleton → sac chain logic → makeanymove).
     """
 
     def __init__(self, name="UCLABot_v6", size=5):
         super().__init__(name)
-        self.move_queue = []
-        self.state_bb = 0
-        self._setup(size)
+        self._size   = size
+        self._tables = _get_tables(size)
+        self.move_queue: list = []
+        # working state rebuilt each get_move() call
+        self._bc:    list = []
+        self._et:    list = []
+        self._three: set  = set()
+        self._safe:  set  = set()
+        # strategy temporaries
+        self._move   = -1
+        self._count  = 0
+        self._loop   = False
+        self._player = 0
 
-    def _setup(self, size):
-        self.size = size
-        self.m = size
-        self.n = size
-        self.n_lines = 2 * size * (size + 1)
-        self.half_lines = self.n_lines // 2
-
-        # BOX_MASKS[i*n+j] = bitmask of the 4 edge-line-indices bounding box (i, j)
-        self.BOX_MASKS = []
-        for r in range(self.size):
-            for c in range(self.size):
-                top = r * self.size + c
-                bottom = (r + 1) * self.size + c
-                left = self.half_lines + c * self.size + r
-                right = self.half_lines + (c + 1) * self.size + r
-                mask = (1 << top) | (1 << bottom) | (1 << left) | (1 << right)
-                self.BOX_MASKS.append(mask)
-
-    # ---------------------------------------------------------------- #
-    # bitboard helpers (replace hedge[][] / vedge[][] / box[][] lookups)
-    # ---------------------------------------------------------------- #
-
-    def hidx(self, i, j):
-        return i * self.n + j
-
-    def vidx(self, i, j):
-        return self.half_lines + j * self.size + i
-
-    def hset(self, i, j):
-        """True if horizontal edge (i, j) is already taken."""
-        return (self.state_bb >> self.hidx(i, j)) & 1 != 0
-
-    def vset(self, i, j):
-        """True if vertical edge (i, j) is already taken."""
-        return (self.state_bb >> self.vidx(i, j)) & 1 != 0
-
-    def box_count(self, i, j):
-        """Number of edges already taken around box (i, j)."""
-        return (self.state_bb & self.BOX_MASKS[i * self.n + j]).bit_count()
-
-    # ---------------------------------------------------------------- #
-    # entry point
-    # ---------------------------------------------------------------- #
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
 
     def get_move(self, game) -> int:
-        if not any(game.l):
-            self.move_queue.clear()
-
+        # Drain pre-planned queue (moves decided in a previous call)
         while self.move_queue:
             mv = self.move_queue[0]
-            if game.l[mv] != 0:
+            if game.l[mv] != 0:          # queue is stale — someone else moved
                 self.move_queue.clear()
                 break
             return self.move_queue.pop(0)
 
-        # rebuild bitboard sizing if the board dimensions changed
-        if len(game.l) != self.n_lines:
-            self._setup(game.SIZE)
+        size = game.SIZE
+        if size != self._size:
+            self._size   = size
+            self._tables = _get_tables(size)
 
-        self.size = game.SIZE
-        self.m = self.size
-        self.n = self.size
-        self.N_LINES = game.N_LINES
+        adj_boxes, adj_edges, n_lines, n_boxes = self._tables
 
-        # pack current line state into the bitboard
-        self.state_bb = 0
-        for i, val in enumerate(game.l):
-            if val != 0:
-                self.state_bb |= (1 << i)
+        # ---- Build working state in O(N_LINES + N_BOXES) ----
+        # box_fill_count: the game already maintains this incrementally
+        bc = list(game.box_fill_count)
+        # edge_taken: flat bool array
+        et = [v != 0 for v in game.l]
 
-        self.player = 0
-        self.zz = 0
-        self.x = -1
-        self.y = -1
-        self.u = -1
-        self.v = -1
-        self.count = 0
-        self.loop = False
+        # three_edge_set
+        three = {b for b in range(n_boxes) if bc[b] == 3}
 
-        self.makemove()
+        # safe_edges: free edges that don't create a 3-edge box
+        safe: set = set()
+        for edge in range(n_lines):
+            if et[edge]:
+                continue
+            for bidx in adj_boxes[edge]:
+                if bc[bidx] == 2:
+                    break
+            else:
+                safe.add(edge)
+
+        self._bc     = bc
+        self._et     = et
+        self._three  = three
+        self._safe   = safe
+        self._player = 0
+
+        self._makemove()
 
         if self.move_queue:
             return self.move_queue.pop(0)
+
+        valid = game.get_valid_moves()
+        return valid[0] if valid else -1
+
+    # ------------------------------------------------------------------
+    # Incremental edge placement — O(adjacency) ≈ O(1)
+    # ------------------------------------------------------------------
+
+    def _place_edge(self, edge: int):
+        """Mark edge as taken; update bc[], three, safe incrementally."""
+        adj_boxes, adj_edges, n_lines, n_boxes = self._tables
+        bc    = self._bc
+        et    = self._et
+        three = self._three
+        safe  = self._safe
+
+        et[edge] = True
+        safe.discard(edge)
+        self.move_queue.append(edge)
+
+        scored = False
+        for bidx in adj_boxes[edge]:
+            bc[bidx] += 1
+            cnt = bc[bidx]
+            if cnt == 3:
+                three.add(bidx)
+                # All free edges of this box are now unsafe (placing them
+                # completes the box, gifting it to the opponent)
+                for e2 in adj_edges[bidx]:
+                    safe.discard(e2)
+            elif cnt == 4:
+                three.discard(bidx)
+                scored = True
+                # Re-evaluate free edges around this now-complete box —
+                # they may have become safe again
+                for e2 in adj_edges[bidx]:
+                    if not et[e2]:
+                        for bidx2 in adj_boxes[e2]:
+                            if bc[bidx2] == 2:
+                                break
+                        else:
+                            safe.add(e2)
+
+        if not scored:
+            self._player ^= 1
+
+    # ------------------------------------------------------------------
+    # Coordinate helpers (inline-friendly)
+    # ------------------------------------------------------------------
+
+    def _rc(self, bidx: int):
+        return divmod(bidx, self._size)
+
+    def _hedge(self, i: int, j: int) -> int:
+        return i * self._size + j
+
+    def _vedge(self, i: int, j: int) -> int:
+        return self._tables[2] // 2 + j * self._size + i
+
+    def _ht(self, i: int, j: int) -> bool:
+        return self._et[i * self._size + j]
+
+    def _vt(self, i: int, j: int) -> bool:
+        return self._et[self._tables[2] // 2 + j * self._size + i]
+
+    def _bc_at(self, i: int, j: int) -> int:
+        return self._bc[i * self._size + j]
+
+    # ------------------------------------------------------------------
+    # Strategy — identical control flow to UCLABot_v3
+    # ------------------------------------------------------------------
+
+    def _makemove(self):
+        self._takesafe3s()
+        if self._three:
+            bidx = next(iter(self._three))
+            i, j = self._rc(bidx)
+            if self._sides01():
+                self._takeall3s()
+                self._place_edge(self._move)
+            else:
+                self._sac(i, j)
+        elif self._sides01():
+            self._place_edge(self._move)
+        elif self._singleton():
+            self._place_edge(self._move)
+        elif self._doubleton():
+            self._place_edge(self._move)
         else:
-            valid = game.get_valid_moves()
-            return valid[0]
+            self._makeanymove()
 
-    # ---------------------------------------------------------------- #
-    # move application
-    # ---------------------------------------------------------------- #
+    # --- takesafe3s ---
 
-    def sethedge(self, x, y):
-        self.state_bb |= (1 << self.hidx(x, y))
-        self.move_queue.append(self.hidx(x, y))
-        self.checkh(x, y)
-        self.player = 1 - self.player
+    def _takesafe3s(self):
+        """Capture all 3-edge boxes that are safe to take without opening a chain."""
+        changed = True
+        while changed:
+            changed = False
+            for bidx in list(self._three):
+                i, j = self._rc(bidx)
+                edge = self._safe_capture_edge(i, j)
+                if edge is not None:
+                    self._place_edge(edge)
+                    changed = True
 
-    def setvedge(self, x, y):
-        self.state_bb |= (1 << self.vidx(x, y))
-        self.move_queue.append(self.vidx(x, y))
-        self.checkv(x, y)
-        self.player = 1 - self.player
+    def _safe_capture_edge(self, i: int, j: int):
+        """Return the free edge of 3-edge box (i,j) that doesn't open a 2-chain."""
+        s = self._size
+        if not self._ht(i, j):
+            if i == 0 or self._bc_at(i - 1, j) != 2:
+                return self._hedge(i, j)
+        if not self._ht(i + 1, j):
+            if i == s - 1 or self._bc_at(i + 1, j) != 2:
+                return self._hedge(i + 1, j)
+        if not self._vt(i, j):
+            if j == 0 or self._bc_at(i, j - 1) != 2:
+                return self._vedge(i, j)
+        if not self._vt(i, j + 1):
+            if j == s - 1 or self._bc_at(i, j + 1) != 2:
+                return self._vedge(i, j + 1)
+        return None
 
-    def checkh(self, x, y):
-        hit = 0
-        if x > 0 and self.box_count(x - 1, y) == 4: hit = 1
-        if x < self.m and self.box_count(x, y) == 4: hit = 1
-        if hit > 0: self.player = 1 - self.player
+    # --- takeall3s ---
 
-    def checkv(self, x, y):
-        hit = 0
-        if y > 0 and self.box_count(x, y - 1) == 4: hit = 1
-        if y < self.n and self.box_count(x, y) == 4: hit = 1
-        if hit > 0: self.player = 1 - self.player
+    def _takeall3s(self):
+        while self._three:
+            bidx = next(iter(self._three))
+            i, j = self._rc(bidx)
+            self._takebox(i, j)
 
-    def takeedge(self, zz, x, y):
-        if zz > 1: self.setvedge(x, y)
-        else: self.sethedge(x, y)
+    def _takebox(self, i: int, j: int):
+        if not self._ht(i, j):         self._place_edge(self._hedge(i, j))
+        elif not self._vt(i, j):       self._place_edge(self._vedge(i, j))
+        elif not self._ht(i + 1, j):   self._place_edge(self._hedge(i + 1, j))
+        else:                           self._place_edge(self._vedge(i, j + 1))
 
-    # ---------------------------------------------------------------- #
-    # strategy (chain rule) - identical control flow to v3
-    # ---------------------------------------------------------------- #
+    # --- sides01: O(1) — just pick from safe_edges set ---
 
-    def makemove(self):
-        self.takesafe3s()
-        if self.sides3():
-            if self.sides01():
-                self.takeall3s()
-                self.takeedge(self.zz, self.x, self.y)
-            else:
-                self.sac(self.u, self.v)
-        elif self.sides01(): self.takeedge(self.zz, self.x, self.y)
-        elif self.singleton(): self.takeedge(self.zz, self.x, self.y)
-        elif self.doubleton(): self.takeedge(self.zz, self.x, self.y)
-        else: self.makeanymove()
+    def _sides01(self) -> bool:
+        if not self._safe:
+            return False
+        self._move = random.choice(list(self._safe))
+        return True
 
-    def takesafe3s(self):
-        for i in range(self.m):
-            for j in range(self.n):
-                if self.box_count(i, j) == 3:
-                    if not self.vset(i, j):
-                        if j == 0 or self.box_count(i, j - 1) != 2: self.setvedge(i, j)
-                    elif not self.hset(i, j):
-                        if i == 0 or self.box_count(i - 1, j) != 2: self.sethedge(i, j)
-                    elif not self.vset(i, j + 1):
-                        if j == self.n - 1 or self.box_count(i, j + 1) != 2: self.setvedge(i, j + 1)
-                    else:
-                        if i == self.m - 1 or self.box_count(i + 1, j) != 2: self.sethedge(i + 1, j)
+    # --- singleton ---
 
-    def sides3(self):
-        for i in range(self.m):
-            for j in range(self.n):
-                if self.box_count(i, j) == 3:
-                    self.u = i
-                    self.v = j
-                    return True
-        return False
-
-    def takeall3s(self):
-        while self.sides3():
-            self.takebox(self.u, self.v)
-
-    def sides01(self):
-        if random.random() < 0.5: self.zz = 1
-        else: self.zz = 2
-        i = int(self.m * random.random())
-        j = int(self.n * random.random())
-        if self.zz == 1:
-            if self.randhedge(i, j): return True
-            else:
-                self.zz = 2
-                if self.randvedge(i, j): return True
-        else:
-            if self.randvedge(i, j): return True
-            else:
-                self.zz = 1
-                if self.randhedge(i, j): return True
-        return False
-
-    def safehedge(self, i, j):
-        if not self.hset(i, j):
-            if i == 0:
-                if self.box_count(i, j) < 2: return True
-            elif i == self.m:
-                if self.box_count(i - 1, j) < 2: return True
-            elif self.box_count(i, j) < 2 and self.box_count(i - 1, j) < 2: return True
-        return False
-
-    def safevedge(self, i, j):
-        if not self.vset(i, j):
-            if j == 0:
-                if self.box_count(i, j) < 2: return True
-            elif j == self.n:
-                if self.box_count(i, j - 1) < 2: return True
-            elif self.box_count(i, j) < 2 and self.box_count(i, j - 1) < 2: return True
-        return False
-
-    def randhedge(self, i, j):
-        x = i
-        y = j
-        while True:
-            if self.safehedge(x, y):
-                self.x = x
-                self.y = y
+    def _singleton(self) -> bool:
+        """Find a 2-edge box with at least 2 free safe exits."""
+        s = self._size
+        for bidx in range(s * s):
+            if self._bc[bidx] != 2:
+                continue
+            i, j = self._rc(bidx)
+            opts = []
+            if not self._ht(i, j) and (i == 0 or self._bc_at(i - 1, j) < 2):
+                opts.append(self._hedge(i, j))
+            if not self._ht(i + 1, j) and (i == s - 1 or self._bc_at(i + 1, j) < 2):
+                opts.append(self._hedge(i + 1, j))
+            if not self._vt(i, j) and (j == 0 or self._bc_at(i, j - 1) < 2):
+                opts.append(self._vedge(i, j))
+            if not self._vt(i, j + 1) and (j == s - 1 or self._bc_at(i, j + 1) < 2):
+                opts.append(self._vedge(i, j + 1))
+            if len(opts) >= 2:
+                self._move = random.choice(opts)
                 return True
-            else:
-                y += 1
-                if y == self.n:
-                    y = 0
-                    x += 1
-                    if x > self.m: x = 0
-            if x == i and y == j: break
         return False
 
-    def randvedge(self, i, j):
-        x = i
-        y = j
-        while True:
-            if self.safevedge(x, y):
-                self.x = x
-                self.y = y
-                return True
-            else:
-                y += 1
-                if y > self.n:
-                    y = 0
-                    x += 1
-                    if x == self.m: x = 0
-            if x == i and y == j: break
-        return False
+    # --- doubleton ---
 
-    def singleton(self):
-        for i in range(self.m):
-            for j in range(self.n):
-                if self.box_count(i, j) == 2:
-                    numb = 0
-                    if not self.hset(i, j):
-                        if i < 1 or self.box_count(i - 1, j) < 2: numb += 1
-                    self.zz = 2
-                    if not self.vset(i, j):
-                        if j < 1 or self.box_count(i, j - 1) < 2: numb += 1
-                        if numb > 1:
-                            self.x, self.y = i, j
-                            return True
-                    if not self.vset(i, j + 1):
-                        if j + 1 == self.n or self.box_count(i, j + 1) < 2: numb += 1
-                        if numb > 1:
-                            self.x, self.y = i, j + 1
-                            return True
-                    self.zz = 1
-                    if not self.hset(i + 1, j):
-                        if i + 1 == self.m or self.box_count(i + 1, j) < 2: numb += 1
-                        if numb > 1:
-                            self.x, self.y = i + 1, j
-                            return True
-        return False
-
-    def doubleton(self):
-        self.zz = 2
-        for i in range(self.m):
-            for j in range(self.n - 1):
-                if self.box_count(i, j) == 2 and self.box_count(i, j + 1) == 2 and not self.vset(i, j + 1):
-                    if self.ldub(i, j) and self.rdub(i, j + 1):
-                        self.x, self.y = i, j + 1
+    def _doubleton(self) -> bool:
+        """Find two adjacent 2-edge boxes sharing a free edge, both with safe exits."""
+        s = self._size
+        # horizontal pairs
+        for i in range(s):
+            for j in range(s - 1):
+                if (self._bc_at(i, j) == 2 and self._bc_at(i, j + 1) == 2
+                        and not self._vt(i, j + 1)):
+                    if self._ldub(i, j) and self._rdub(i, j + 1):
+                        self._move = self._vedge(i, j + 1)
                         return True
-        self.zz = 1
-        for j in range(self.n):
-            for i in range(self.m - 1):
-                if self.box_count(i, j) == 2 and self.box_count(i + 1, j) == 2 and not self.hset(i + 1, j):
-                    if self.udub(i, j) and self.ddub(i + 1, j):
-                        self.x, self.y = i + 1, j
+        # vertical pairs
+        for j in range(s):
+            for i in range(s - 1):
+                if (self._bc_at(i, j) == 2 and self._bc_at(i + 1, j) == 2
+                        and not self._ht(i + 1, j)):
+                    if self._udub(i, j) and self._ddub(i + 1, j):
+                        self._move = self._hedge(i + 1, j)
                         return True
         return False
 
-    def ldub(self, i, j):
-        if not self.vset(i, j):
-            if j < 1 or self.box_count(i, j - 1) < 2: return True
-        elif not self.hset(i, j):
-            if i < 1 or self.box_count(i - 1, j) < 2: return True
-        elif i == self.m - 1 or self.box_count(i + 1, j) < 2: return True
+    def _ldub(self, i, j):
+        s = self._size
+        if not self._vt(i, j):
+            if j < 1 or self._bc_at(i, j - 1) < 2: return True
+        elif not self._ht(i, j):
+            if i < 1 or self._bc_at(i - 1, j) < 2: return True
+        elif i == s - 1 or self._bc_at(i + 1, j) < 2: return True
         return False
 
-    def rdub(self, i, j):
-        if not self.vset(i, j + 1):
-            if j + 1 == self.n or self.box_count(i, j + 1) < 2: return True
-        elif not self.hset(i, j):
-            if i < 1 or self.box_count(i - 1, j) < 2: return True
-        elif i + 1 == self.m or self.box_count(i + 1, j) < 2: return True
+    def _rdub(self, i, j):
+        s = self._size
+        if not self._vt(i, j + 1):
+            if j + 1 == s or self._bc_at(i, j + 1) < 2: return True
+        elif not self._ht(i, j):
+            if i < 1 or self._bc_at(i - 1, j) < 2: return True
+        elif i + 1 == s or self._bc_at(i + 1, j) < 2: return True
         return False
 
-    def udub(self, i, j):
-        if not self.hset(i, j):
-            if i < 1 or self.box_count(i - 1, j) < 2: return True
-        elif not self.vset(i, j):
-            if j < 1 or self.box_count(i, j - 1) < 2: return True
-        elif j == self.n - 1 or self.box_count(i, j + 1) < 2: return True
+    def _udub(self, i, j):
+        s = self._size
+        if not self._ht(i, j):
+            if i < 1 or self._bc_at(i - 1, j) < 2: return True
+        elif not self._vt(i, j):
+            if j < 1 or self._bc_at(i, j - 1) < 2: return True
+        elif j == s - 1 or self._bc_at(i, j + 1) < 2: return True
         return False
 
-    def ddub(self, i, j):
-        if not self.hset(i + 1, j):
-            if i == self.m - 1 or self.box_count(i + 1, j) < 2: return True
-        elif not self.vset(i, j):
-            if j < 1 or self.box_count(i, j - 1) < 2: return True
-        elif j == self.n - 1 or self.box_count(i, j + 1) < 2: return True
+    def _ddub(self, i, j):
+        s = self._size
+        if not self._ht(i + 1, j):
+            if i == s - 1 or self._bc_at(i + 1, j) < 2: return True
+        elif not self._vt(i, j):
+            if j < 1 or self._bc_at(i, j - 1) < 2: return True
+        elif j == s - 1 or self._bc_at(i, j + 1) < 2: return True
         return False
 
-    def sac(self, i, j):
-        self.count = 0
-        self.loop = False
-        self.incount(0, i, j)
-        if not self.loop: self.takeallbut(i, j)
-        boxes_taken = sum(1 for r in range(self.m) for c in range(self.n) if self.box_count(r, c) == 4)
-        if self.count + boxes_taken == self.m * self.n:
-            self.takeall3s()
+    # --- sacrifice / chain logic ---
+
+    def _sac(self, i: int, j: int):
+        s = self._size
+        self._count = 0
+        self._loop  = False
+        self._incount(0, i, j)
+        if not self._loop:
+            self._takeallbut(i, j)
+        boxes_taken = sum(1 for bc in self._bc if bc == 4)
+        if self._count + boxes_taken == s * s:
+            self._takeall3s()
         else:
-            if self.loop:
-                self.count -= 2
-            self.outcount(0, i, j)
+            if self._loop:
+                self._count -= 2
+            self._outcount(0, i, j)
 
-    def incount(self, k, i, j):
-        self.count += 1
-        if k != 1 and not self.vset(i, j):
+    def _incount(self, k: int, i: int, j: int):
+        s = self._size
+        self._count += 1
+        if k != 1 and not self._vt(i, j):
             if j > 0:
-                if self.box_count(i, j - 1) > 2:
-                    self.count += 1
-                    self.loop = True
-                elif self.box_count(i, j - 1) > 1: self.incount(3, i, j - 1)
-        elif k != 2 and not self.hset(i, j):
+                bc = self._bc_at(i, j - 1)
+                if bc > 2:
+                    self._count += 1; self._loop = True
+                elif bc > 1:
+                    self._incount(3, i, j - 1)
+        elif k != 2 and not self._ht(i, j):
             if i > 0:
-                if self.box_count(i - 1, j) > 2:
-                    self.count += 1
-                    self.loop = True
-                elif self.box_count(i - 1, j) > 1: self.incount(4, i - 1, j)
-        elif k != 3 and not self.vset(i, j + 1):
-            if j < self.n - 1:
-                if self.box_count(i, j + 1) > 2:
-                    self.count += 1
-                    self.loop = True
-                elif self.box_count(i, j + 1) > 1: self.incount(1, i, j + 1)
-        elif k != 4 and not self.hset(i + 1, j):
-            if i < self.m - 1:
-                if self.box_count(i + 1, j) > 2:
-                    self.count += 1
-                    self.loop = True
-                elif self.box_count(i + 1, j) > 1: self.incount(2, i + 1, j)
+                bc = self._bc_at(i - 1, j)
+                if bc > 2:
+                    self._count += 1; self._loop = True
+                elif bc > 1:
+                    self._incount(4, i - 1, j)
+        elif k != 3 and not self._vt(i, j + 1):
+            if j < s - 1:
+                bc = self._bc_at(i, j + 1)
+                if bc > 2:
+                    self._count += 1; self._loop = True
+                elif bc > 1:
+                    self._incount(1, i, j + 1)
+        elif k != 4 and not self._ht(i + 1, j):
+            if i < s - 1:
+                bc = self._bc_at(i + 1, j)
+                if bc > 2:
+                    self._count += 1; self._loop = True
+                elif bc > 1:
+                    self._incount(2, i + 1, j)
 
-    def takeallbut(self, x, y):
-        while self.sides3not(x, y):
-            self.takebox(self.u, self.v)
-
-    def sides3not(self, x, y):
-        for i in range(self.m):
-            for j in range(self.n):
-                if self.box_count(i, j) == 3:
-                    if i != x or j != y:
-                        self.u, self.v = i, j
-                        return True
-        return False
-
-    def takebox(self, i, j):
-        if not self.hset(i, j): self.sethedge(i, j)
-        elif not self.vset(i, j): self.setvedge(i, j)
-        elif not self.hset(i + 1, j): self.sethedge(i + 1, j)
-        else: self.setvedge(i, j + 1)
-
-    def outcount(self, k, i, j):
-        if self.count > 0:
-            if k != 1 and not self.vset(i, j):
-                if self.count != 2: self.setvedge(i, j)
-                self.count -= 1
-                self.outcount(3, i, j - 1)
-            elif k != 2 and not self.hset(i, j):
-                if self.count != 2: self.sethedge(i, j)
-                self.count -= 1
-                self.outcount(4, i - 1, j)
-            elif k != 3 and not self.vset(i, j + 1):
-                if self.count != 2: self.setvedge(i, j + 1)
-                self.count -= 1
-                self.outcount(1, i, j + 1)
-            elif k != 4 and not self.hset(i + 1, j):
-                if self.count != 2: self.sethedge(i + 1, j)
-                self.count -= 1
-                self.outcount(2, i + 1, j)
-
-    def makeanymove(self):
-        x = -1
-        y = -1
-        found = False
-        for i in range(self.m + 1):
-            for j in range(self.n):
-                if not self.hset(i, j):
-                    x, y = i, j
-                    found = True
+    def _takeallbut(self, xi: int, xj: int):
+        """Take all 3-edge boxes except (xi, xj)."""
+        while True:
+            found = None
+            for bidx in self._three:
+                i, j = self._rc(bidx)
+                if i != xi or j != xj:
+                    found = (i, j)
                     break
-            if found: break
+            if found is None:
+                break
+            self._takebox(found[0], found[1])
 
-        if not found:
-            for i in range(self.m):
-                for j in range(self.n + 1):
-                    if not self.vset(i, j):
-                        x, y = i, j
-                        found = True
-                        break
-                if found: break
-            if found:
-                self.setvedge(x, y)
-        else:
-            self.sethedge(x, y)
-
-        if not found:
+    def _outcount(self, k: int, i: int, j: int):
+        if self._count <= 0:
             return
+        if k != 1 and not self._vt(i, j):
+            if self._count != 2:
+                self._place_edge(self._vedge(i, j))
+            self._count -= 1
+            self._outcount(3, i, j - 1)
+        elif k != 2 and not self._ht(i, j):
+            if self._count != 2:
+                self._place_edge(self._hedge(i, j))
+            self._count -= 1
+            self._outcount(4, i - 1, j)
+        elif k != 3 and not self._vt(i, j + 1):
+            if self._count != 2:
+                self._place_edge(self._vedge(i, j + 1))
+            self._count -= 1
+            self._outcount(1, i, j + 1)
+        elif k != 4 and not self._ht(i + 1, j):
+            if self._count != 2:
+                self._place_edge(self._hedge(i + 1, j))
+            self._count -= 1
+            self._outcount(2, i + 1, j)
 
-        if self.player == 0:
-            self.makemove()
+    # --- fallback: any free edge ---
+
+    def _makeanymove(self):
+        _, _, n_lines, _ = self._tables
+        for edge in range(n_lines):
+            if not self._et[edge]:
+                self._place_edge(edge)
+                if self._player == 0:
+                    self._makemove()
+                return
