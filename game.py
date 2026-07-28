@@ -53,6 +53,20 @@ class DotsAndBoxesGame:
         self.N_BOXES = size * size
         self.b = np.zeros((size, size), dtype=np.float32)
 
+        # Precompute static mappings
+        self.line_to_boxes = [[] for _ in range(self.N_LINES)]
+        self.box_to_lines = [[] for _ in range(self.N_BOXES)]
+        for line in range(self.N_LINES):
+            boxes = self.get_boxes_of_line(line)
+            box_indices = [r * self.SIZE + c for r, c in boxes]
+            self.line_to_boxes[line] = tuple(box_indices)
+            for box_idx in box_indices:
+                self.box_to_lines[box_idx].append(line)
+        self.box_to_lines = tuple(tuple(lines) for lines in self.box_to_lines)
+        self.line_to_boxes = tuple(self.line_to_boxes)
+
+        self.box_fill_count = [0] * self.N_BOXES
+
         # undo stack: each entry is (line, boxes_captured, player_before, result_before)
         self._history: list = []
 
@@ -84,11 +98,12 @@ class DotsAndBoxesGame:
 
         # check whether a new box was captured
         boxes_captured = []
-        for box in self.get_boxes_of_line(line):
-            lines = self.get_lines_of_box(box)
-            if np.count_nonzero(self.l[lines]) == 4:
-                self.capture_box(row=box[0], col=box[1])
-                boxes_captured.append(box)
+        for box_idx in self.line_to_boxes[line]:
+            self.box_fill_count[box_idx] += 1
+            if self.box_fill_count[box_idx] == 4:
+                row, col = divmod(box_idx, self.SIZE)
+                self.capture_box(row=row, col=col)
+                boxes_captured.append((row, col))
 
         # switch current player when the player did not capture a box
         if not boxes_captured:
@@ -112,6 +127,9 @@ class DotsAndBoxesGame:
         # Un-draw the line
         self.l[line] = 0.0
 
+        for box_idx in self.line_to_boxes[line]:
+            self.box_fill_count[box_idx] -= 1
+
         # Un-capture any boxes
         for box in boxes_captured:
             self.b[box[0]][box[1]] = 0.0
@@ -132,6 +150,9 @@ class DotsAndBoxesGame:
         c.early_stopping = self.early_stopping
         c.l = self.l.copy()
         c.b = self.b.copy()
+        c.line_to_boxes = self.line_to_boxes
+        c.box_to_lines = self.box_to_lines
+        c.box_fill_count = list(self.box_fill_count)
         c._history = list(self._history) if track_history else []
         return c
 

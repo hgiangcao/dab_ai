@@ -19,40 +19,35 @@ class FillBot(BaseAgent):
 
     def get_move(self, game_state) -> int:
         available_edges = game_state.get_valid_moves()
-        
-        # ƯU TIÊN 1: Tìm cạnh thứ 4 (Ăn điểm)
+        if not available_edges:
+            return None
+
+        fill = game_state.box_fill_count        # O(1) array, precomputed
+        line_to_boxes = game_state.line_to_boxes # precomputed static mapping
+
+        safe_count = 0
+        safe_choice = None
+        sac_choice = available_edges[0]  # fallback sacrifice, avoid extra pass
+
         for edge in available_edges:
-            adjacent_boxes = game_state.get_boxes_of_line(edge)
-            for box in adjacent_boxes:
-                lines = game_state.get_lines_of_box(box)
-                filled_edges = np.count_nonzero(game_state.l[lines])
-                if filled_edges == 3:
-                    return edge # Điền ngay để ăn điểm!
-                    
-        # ƯU TIÊN 2: Tìm cạnh an toàn (Cạnh thứ 1 hoặc 2)
-        safe_edges = []
-        for edge in available_edges:
-            adjacent_boxes = game_state.get_boxes_of_line(edge)
-            is_safe = True
-            
-            # Kiểm tra xem việc điền cạnh này có làm ô nào lên 3 cạnh không
-            for box in adjacent_boxes:
-                lines = game_state.get_lines_of_box(box)
-                filled_edges = np.count_nonzero(game_state.l[lines])
-                if filled_edges == 2:
-                    is_safe = False
-                    break
-                    
-            if is_safe:
-                safe_edges.append(edge)
-                
-        if safe_edges:
-            # Chọn ngẫu nhiên một nước đi an toàn để tăng tính đa dạng cho dữ liệu
-            return random.choice(safe_edges)
-            
-        # ƯU TIÊN 3: Bắt buộc hy sinh (Điền cạnh thứ 3)
-        # Vì không còn cách nào khác, chọn đại một cạnh còn trống
-        if available_edges:
-            return random.choice(available_edges)
-            
-        return None
+            boxes = line_to_boxes[edge]
+            max_fill = 0
+            for box in boxes:
+                f = fill[box]
+                if f == 3:
+                    return edge          # PRIORITY 1: immediate capture, early exit
+                if f > max_fill:
+                    max_fill = f
+
+            if max_fill < 2:
+                # PRIORITY 2 candidate — reservoir sampling, no list built
+                safe_count += 1
+                if random.randrange(safe_count) == 0:
+                    safe_choice = edge
+
+        if safe_choice is not None:
+            return safe_choice
+
+        # PRIORITY 3: forced sacrifice — just return first valid edge,
+        # or reservoir-sample if you need true uniformity (usually not needed for rollouts)
+        return sac_choice
