@@ -116,6 +116,9 @@ def create_agent(name: str, size: int):
     elif name == "ARM_bot":
         from bots.arm_bot import ArmandoBot
         return ArmandoBot(name=name, ply=2)
+    elif name == "fill_bot":
+        from bots.fill_bot import FillBot
+        return FillBot(name=name)
     else:
         raise ValueError(f"Unknown agent name: {name}")
 
@@ -217,7 +220,7 @@ def main():
 
     # List of agent names to include in the tournament
     agent_names = [
-        # "Random", 
+        "Random", 
         "Greedy", 
         # "Greedy Chain",
         # "Alpha-Beta (0.1s)", 
@@ -234,7 +237,7 @@ def main():
         # "UCLABot_v2",
         "UCLABot_v3",
         # "UCLABot_v4",
-        # "UCLABot_v6",
+         "UCLABot_v6",
         # "UCLABot_v4",   
         # "UCLAGreedyBot",
         # "UCLAAlphaBeta",
@@ -245,7 +248,8 @@ def main():
         # "UCLA_MCTS_0.1",
         # "UCLA_MCTS_0.5",
         # "UCLA_MCTS_0.2",
-        "ARM_bot"
+        # "ARM_bot",
+        "fill_bot"
 
     ]
     n_agents = len(agent_names)
