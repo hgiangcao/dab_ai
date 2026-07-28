@@ -467,7 +467,9 @@ class AlphaZeroTrainer:
                             moves = record.get("moves", [])
                             # Only load games that match our current board size exactly
                             if moves and len(moves) == expected_moves:
-                                self.json_logs.append(moves)
+                                # Store as int8 (0-127 range covers all line indices)
+                                # Saves ~28x RAM vs Python list-of-ints (1 byte vs 28 bytes per move)
+                                self.json_logs.append(np.array(moves, dtype=np.int8))
                         except Exception:
                             pass
         print(f"Loaded {len(self.json_logs)} historical game sequences of size {self.game_size}x{self.game_size} for Reverse Curriculum.")
@@ -508,7 +510,8 @@ class AlphaZeroTrainer:
             
             # Sample random sequences for each episode
             if self.json_logs and start_fill_pct >= 0.001:
-                sampled_sequences = [random.choice(self.json_logs) for _ in range(self.args.num_eps)]
+                # Convert back to list[int] so execute_move receives native Python ints
+                sampled_sequences = [random.choice(self.json_logs).tolist() for _ in range(self.args.num_eps)]
             else:
                 sampled_sequences = [None] * self.args.num_eps
             

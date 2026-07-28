@@ -51,7 +51,7 @@ class DotsAndBoxesGame:
 
         # boxes
         self.N_BOXES = size * size
-        self.b = np.zeros((size, size))
+        self.b = np.zeros((size, size), dtype=np.float32)
 
         # undo stack: each entry is (line, boxes_captured, player_before, result_before)
         self._history: list = []
