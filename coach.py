@@ -495,13 +495,6 @@ class AlphaZeroTrainer:
             past_checkpoints = past_checkpoints[-5:] if past_checkpoints else []
             best_path = os.path.join(self.args.checkpoint_dir, 'best.pth.tar')
             
-            # Sample random sequences for each episode
-            if self.json_logs and start_fill_pct >= 0.001:
-                # Convert back to list[int] so execute_move receives native Python ints
-                sampled_sequences = [random.choice(self.json_logs).tolist() for _ in range(self.args.num_eps)]
-            else:
-                sampled_sequences = [None] * self.args.num_eps
-            
             episode_specs = []
             
             current_pool = list(config.PHASES_CONFIG[self.current_phase])
@@ -518,14 +511,15 @@ class AlphaZeroTrainer:
                 
                 if opp_type == "best":
                     opp_path = best_path if os.path.exists(best_path) else None
-                    if opp_path is None: opp_type = "self"
                 elif opp_type == "past":
                     opp_path = random.choice(past_checkpoints) if past_checkpoints else None
-                    if opp_path is None: opp_type = "self"
                     
-                episode_specs.append((start_fill_pct, opp_type, opp_path))
+                episode_specs.append((
+                    start_fill_pct,
+                    opp_type,
+                    opp_path
+                ))
             
-            # 1. Self-Play (Parallelized)
             print(f"------------ Self-Play (Fill: {start_fill_pct*100:.1f}%) ------------")
             iteration_data = []
             episode_lengths = []

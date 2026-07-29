@@ -1,6 +1,5 @@
 from agent_interface import BaseAgent
-
-# Sentinel value for "no second box" (border edges touch only 1 box)
+import random# Sentinel value for "no second box" (border edges touch only 1 box)
 _NONE = -1
 
 
@@ -35,11 +34,11 @@ class FillBot(BaseAgent):
     * Unused imports removed (numpy, sys, os).
     * Inner loop unrolled: two explicit box checks replace tuple iteration.
     * `max_fill` replaced by a single `safe` bool (one less assign per iter).
-    * Reservoir sampling removed — first safe edge wins (deterministic, faster).
     * `get_valid_moves()` replaced by direct iteration over `game_state.l` to
       avoid allocating a new list every call.
     * `fill`, `edge_box1`, `edge_box2`, `_NONE_` all cached as locals so CPython
       resolves them without attribute / global lookups inside the hot loop.
+    * Randomness is retained for safe and sacrifice edges to ensure state diversity.
     """
 
     def __init__(self, name: str = "FillBot"):
@@ -63,16 +62,14 @@ class FillBot(BaseAgent):
         edge_box2 = self._edge_box2
         NONE      = _NONE
 
-        safe_choice = NONE
-        sac_choice  = NONE
+        safe_edges = []
+        sac_edges = []
 
         for edge in range(n_lines):
             if l[edge] != 0:
                 continue                  # edge already taken
 
-            # Track first available edge as sacrifice fallback
-            if sac_choice == NONE:
-                sac_choice = edge
+            sac_edges.append(edge)
 
             # ---- unrolled 2-box check (avoids inner loop + tuple overhead) ----
             safe = True
@@ -93,12 +90,12 @@ class FillBot(BaseAgent):
                 if f >= 2:
                     safe = False
 
-            # ---- PRIORITY 2: first safe edge (no randomness needed here) ----
-            if safe and safe_choice == NONE:
-                safe_choice = edge
+            # ---- PRIORITY 2: collect safe edges ----
+            if safe:
+                safe_edges.append(edge)
 
-        if safe_choice != NONE:
-            return safe_choice
+        if safe_edges:
+            return random.choice(safe_edges)
 
         # PRIORITY 3: forced sacrifice
-        return sac_choice if sac_choice != NONE else None
+        return random.choice(sac_edges) if sac_edges else None

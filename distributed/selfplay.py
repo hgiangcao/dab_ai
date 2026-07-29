@@ -181,6 +181,7 @@ class SelfPlayGenerator:
         import json
         bot_stats_json = json.dumps(bot_stats)
 
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
         np.savez_compressed(
             filename,
             lines=lines_data,
