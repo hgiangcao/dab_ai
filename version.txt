@@ -1,4 +1,4 @@
-run: run_54
-last_updated_model: 63
-current_phase: 5
-finish_pretrain: True
+run: run_55
+last_updated_model: 0
+current_phase: 0
+finish_pretrain: False

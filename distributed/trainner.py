@@ -264,7 +264,7 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     
     return True
 
-def training_loop():
+def training_loop(load_checkpoint=None):
     """
     Main infinite training loop.
     Monitors replay files and runs iterations continuously.
@@ -315,12 +315,16 @@ def training_loop():
 
     
     # Try to load full checkpoint (weights + optimizer + scheduler state)
-    candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
-    if os.path.exists(candidate_path):
-        load_path = candidate_path
-        print("Load pretrained model checkpoint_candidate")
+    if load_checkpoint and os.path.exists(load_checkpoint):
+        load_path = load_checkpoint
+        print(f"Loading specifically requested checkpoint from {load_checkpoint}")
     else:
-        load_path = model_manager.get_latest_model_path()
+        candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
+        if os.path.exists(candidate_path):
+            load_path = candidate_path
+            print("Load pretrained model checkpoint_candidate")
+        else:
+            load_path = model_manager.get_latest_model_path()
         
     if os.path.exists(load_path):
         checkpoint = torch.load(load_path, map_location='cpu', weights_only=False)
@@ -370,4 +374,10 @@ def training_loop():
             time.sleep(30)
 
 if __name__ == "__main__":
-    training_loop()
+    import argparse
+    parser = argparse.ArgumentParser(description="Distributed AlphaZero Trainer")
+    parser.add_argument("--pretrained_path", type=str, default=None, 
+                        help="Specific checkpoint path to load and resume training from.")
+    args = parser.parse_args()
+    
+    training_loop(load_checkpoint=args.load_checkpoint)

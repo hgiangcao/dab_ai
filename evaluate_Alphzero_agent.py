@@ -121,6 +121,9 @@ def create_agent(name: str, size: int, model_path: str = "best.pth.tar", n_simul
     elif name == "SimpleBot_v2":
         from bots.simple_bot_v2 import SimpleBotV2
         return SimpleBotV2(name=name)
+    elif name == "UCLABot_v6":
+        from bots.ucla_bot_v6 import UCLABot_v6
+        return UCLABot_v6(name=name)
     else:
         raise ValueError(f"Unknown agent name: {name}")
 
@@ -157,7 +160,7 @@ def run_single_game(args):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate AlphaZero agent against other bots.")
     parser.add_argument("--size", type=int, default=5, help="Grid size of the Dots and Boxes board (default: 5).")
-    parser.add_argument("--games", type=int, default=20, help="Number of games to play per matchup (default: 20).")
+    parser.add_argument("--games", type=int, default=100, help="Number of games to play per matchup (default: 20).")
     parser.add_argument("--workers", type=int, default=None, help="Number of parallel worker processes (default: cpu_count - 1).")
     parser.add_argument("--output", type=str, default="alphazero_evaluation.png", help="Path to export the results visualization PNG (default: alphazero_evaluation.png).")
     parser.add_argument("--run", type=str, default=None, help="The run subdirectory name under logs (e.g. run_1) to load best.pth.tar from. If not specified, loads from project root.")
@@ -175,10 +178,11 @@ def main():
         # "Greedy", 
         # "Greedy Chain",
         "UCLABot_v3",
+        "UCLABot_v6",
         # "SimpleBot",
         # "SimpleBot_v2",
         # "UCLA_MCTS_0.1",
-        # "UCLA_MCTS_0.2",
+        "UCLA_MCTS_0.2",
     ]
 
     tasks = []

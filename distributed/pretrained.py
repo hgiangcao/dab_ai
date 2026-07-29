@@ -236,7 +236,7 @@ def pretrain(nnet: NNetWrapper, dataset: Dataset, args=PRETRAIN_ARGS, writer=Non
         lr=args.lr,
         weight_decay=args.l2_reg
     )
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=5e-5)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-4)
 
     dataloader = DataLoader(
         dataset,
