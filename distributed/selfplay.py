@@ -53,23 +53,7 @@ class SelfPlayGenerator:
         })
         self.latest_model_path = None
         
-        # Load Reverse Curriculum Logs
-        self.json_logs = []
-        log_path = os.path.join(PROJECT_ROOT, "game_logs.jsonl")
-        expected_moves = 2 * self.game_size * (self.game_size + 1)
-        if os.path.exists(log_path):
-            with open(log_path, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            record = json.loads(line)
-                            moves = record.get("moves", [])
-                            if moves and len(moves) == expected_moves:
-                                self.json_logs.append(moves)
-                        except Exception:
-                            pass
-        print(f"SelfPlayGenerator initialized. Loaded {len(self.json_logs)} historical sequences.")
+        print(f"SelfPlayGenerator initialized. (Size: {self.game_size}x{self.game_size})")
  
     def load_model(self, checkpoint):
         """Loads the path to the latest model to be used by the multiprocessing workers."""
@@ -87,16 +71,11 @@ class SelfPlayGenerator:
         # Reverse Curriculum Fill % approximation based on model version (iterations)
         start_fill_pct = max(0.0, 0.70 - (0.70 / 10) * epoch)
         
-        if self.json_logs and start_fill_pct >= 0.001:
-            sampled_sequences = [random.choice(self.json_logs) for _ in range(num_games)]
-        else:
-            sampled_sequences = [None] * num_games
-        
         print(start_fill_pct,"RANDOM FILLED MOVES")
         
         # 3. Setup episode specs for chunked multiprocessing
         episode_specs = []
-        for seq in sampled_sequences:
+        for _ in range(num_games):
             opp_type = np.random.choice([name for name, _ in current_pool], p=normalized_probs)
             # Workers don't necessarily have server's "best" or "past" checkpoints readily available.
             # Revert them to "self" to guarantee execution.
@@ -104,7 +83,6 @@ class SelfPlayGenerator:
                 opp_type = "self"
                 
             episode_specs.append((
-                seq,
                 start_fill_pct,
                 opp_type,
                 None # opp_path is None because we don't have past checkpoints locally
