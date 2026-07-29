@@ -380,4 +380,4 @@ if __name__ == "__main__":
                         help="Specific checkpoint path to load and resume training from.")
     args = parser.parse_args()
     
-    training_loop(load_checkpoint=args.load_checkpoint)
+    training_loop(load_checkpoint=args.pretrained_path)
