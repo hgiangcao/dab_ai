@@ -356,8 +356,10 @@ def training_loop(load_checkpoint=None):
     model_manager.save_latest_model(global_nnet)
     best_path = model_manager.get_best_model_path()
     candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
+    checkpoint0_path = os.path.join(config.get_current_model_dir(), "checkpoint_0.pth.tar")
     import shutil
     shutil.copyfile(candidate_path, best_path)
+    shutil.copyfile(candidate_path, checkpoint0_path)
     
 
     # Initialize rolling experience replay buffer capped at MAX_REPLAY_SIZE
