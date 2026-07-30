@@ -107,9 +107,13 @@ def load_replay_buffer(files=None):
     buffer = []
     for filepath in files:
         try:
-            data = np.load(filepath, allow_pickle=False)
-            for i in range(len(data['lines'])):
-                buffer.append((data['lines'][i], data['boxes'][i], data['pis'][i], data['vals'][i]))
+            with np.load(filepath, allow_pickle=False) as data:
+                lines = data['lines']
+                boxes = data['boxes']
+                pis = data['pis']
+                vals = data['vals']
+                for line, box, pi, val in zip(lines, boxes, pis, vals):
+                    buffer.append((line.copy(), box.copy(), pi.copy(), val.copy()))
         except Exception as e:
             print(f"Failed to load {filepath}: {e}")
 

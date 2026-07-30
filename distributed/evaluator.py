@@ -168,7 +168,7 @@ def evaluate_model(candidate_model_path, best_model_path, num_games):
         worker_args_list.append((candidate_model_path, best_model_path, p1_starts))
         
     mp_context = multiprocessing.get_context('spawn')
-    num_workers = max(1, multiprocessing.cpu_count() - 1)
+    num_workers = max(1, min(config.MAX_WORKERS, multiprocessing.cpu_count() - 1))
     
     print(f"Evaluating candidate model over {num_games} arena games using {num_workers} processes...")
     
@@ -236,7 +236,7 @@ def evaluate_baselines(candidate_model_path, num_games=10):
     baseline_win_rates = {}
     
     mp_context = multiprocessing.get_context('spawn')
-    num_workers = max(1, multiprocessing.cpu_count() - 1)
+    num_workers = max(1, min(config.MAX_WORKERS, multiprocessing.cpu_count() - 1))
     
     for opp_id, opp_name in baselines.items():
         print(f"Evaluating candidate against {opp_name}...")
