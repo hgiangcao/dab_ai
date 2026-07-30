@@ -47,6 +47,8 @@ def main():
         server_phase = int(server_info.get("current_phase", 0))
         finish_pretrain = server_info.get("finish_pretrain", "False")
 
+        server_phase_iteration = int(server_info.get("phase_iteration", 0))
+
         if finish_pretrain.lower() != "true":
             print("Server indicates pretraining is not finished. Waiting...")
             time.sleep(10)
@@ -73,7 +75,7 @@ def main():
                 worker_id=args.worker,
                 model_version=local_version,
                 current_phase=server_phase,
-                epoch=epoch
+                epoch=server_phase_iteration
             )
         except Exception as e:
             print(f"Error during self-play generation: {e}")

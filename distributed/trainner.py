@@ -102,7 +102,7 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
             worker_id="trainer_fallback",
             model_version=iteration,
             current_phase=model_manager.get_current_phase(),
-            epoch=iteration
+            epoch=model_manager.get_phase_iteration()
         )
         if replay_file and os.path.exists(replay_file):
             print(f"Trainer fallback generated {replay_file}.")
@@ -117,6 +117,8 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     # 2.5 Check Curriculum Phase Winrates
     client_winrates = []
     current_server_phase = model_manager.get_current_phase()
+    phase_iterations = model_manager.get_phase_iteration()
+    phase_advanced = False
     
     import json
     aggregated_bot_stats = {}
@@ -165,15 +167,19 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
             
         # Advance phase only when the model is genuinely winning, 
         # with a backstop of 20 iterations so training never stalls forever.
-        phase_iterations = iteration % 30  # rough estimate of iters spent in current phase
         threshold = config.PHASE_ADVANCE_THRESHOLD.get(current_phase, 0.60)
-        if (max_client_winrate >= threshold ) and current_phase < len(config.PHASES_CONFIG) - 1:
-            reason = f"Winrate {max_client_winrate:.1%} >= {threshold:.0%}" if max_client_winrate >= threshold else "Max phase iterations reached"
-            print(f"\n===========================================================")
-            print(f"Phase {current_phase} cleared ({reason})!")
-            print(f"Advancing to Phase {current_phase + 1}...")
-            print(f"===========================================================\n")
-            model_manager.advance_curriculum_phase()
+        
+        # Only check activate next phase after this 10 filled game epoch 
+        # (actual winrate when the game starting from scratch)
+        if phase_iterations >= 10:
+            if (max_client_winrate >= threshold ) and current_phase < len(config.PHASES_CONFIG) - 1:
+                reason = f"Winrate {max_client_winrate:.1%} >= {threshold:.0%}" if max_client_winrate >= threshold else "Max phase iterations reached"
+                print(f"\n===========================================================")
+                print(f"Phase {current_phase} cleared ({reason})!")
+                print(f"Advancing to Phase {current_phase + 1}...")
+                print(f"===========================================================\n")
+                model_manager.advance_curriculum_phase()
+                phase_advanced = True
         
     # 3. Load the replay buffer from training/
     new_data = replay_manager.load_replay_buffer(claimed_files)
@@ -258,6 +264,10 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
 
     # 6. Mark files as used
     replay_manager.mark_used(claimed_files)
+    
+    # Increment phase iteration if we didn't advance the phase this round
+    if not phase_advanced:
+        model_manager.increment_phase_iteration()
     
     # 7. Maintain disk space
     replay_manager.cleanup_old(days=7)
