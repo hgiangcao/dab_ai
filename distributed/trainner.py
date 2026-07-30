@@ -349,6 +349,15 @@ def training_loop(load_checkpoint=None):
     else:
         print("No previous model found. Initializing randomly.")
         
+    # CRITICAL: Save the model (whether loaded or randomly initialized) to disk
+    # so that the fallback generator and remote workers pick up these exact weights
+    # before they generate the first batch of self-play games.
+    print("Synchronizing loaded/initial model to disk for workers...")
+    model_manager.save_latest_model(global_nnet)
+    best_path = model_manager.get_best_model_path()
+    candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
+    import shutil
+    shutil.copyfile(candidate_path, best_path)
     
 
     # Initialize rolling experience replay buffer capped at MAX_REPLAY_SIZE
