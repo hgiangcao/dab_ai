@@ -3,7 +3,166 @@ import math
 import random
 import time
 import numpy as np
-from typing import Tuple, List
+from typing import Tuple, List, Optional
+
+# ====================================================================
+# EMBEDDED BOARD MANAGER  (self-contained — no external imports)
+# ====================================================================
+
+class _Point:
+    __slots__ = ('id', 'row', 'col', 'edges', 'degree')
+    def __init__(self, id_, row, col):
+        self.id     = id_
+        self.row    = row
+        self.col    = col
+        self.edges  = []
+        self.degree = 0
+
+class _Edge:
+    __slots__ = ('id', 'p1', 'p2', 'boxes', 'occupied', 'direction')
+    def __init__(self, id_, p1, p2, direction):
+        self.id        = id_
+        self.p1        = p1
+        self.p2        = p2
+        self.boxes     = []
+        self.occupied  = False
+        self.direction = direction
+
+class _Box:
+    __slots__ = ('id', 'row', 'col', 'edges', 'edge_count', 'owner')
+    def __init__(self, id_, row, col):
+        self.id         = id_
+        self.row        = row
+        self.col        = col
+        self.edges      = {}   # "top"/"bottom"/"left"/"right" -> _Edge
+        self.edge_count = 0
+        self.owner      = None
+
+
+class _BoardManager:
+    """
+    Self-contained structural board manager.
+    Tracks point degrees, edge occupancy, and box edge-counts in O(1) per move.
+    Built once per turn from the current game state.
+    """
+
+    def __init__(self, rows: int, cols: int):
+        self.rows = rows
+        self.cols = cols
+
+        self.points = [
+            [_Point(r * (cols + 1) + c, r, c) for c in range(cols + 1)]
+            for r in range(rows + 1)
+        ]
+        self.boxes   = []
+        self.edges   = []
+        self.h_edges = [[None] * cols for _ in range(rows + 1)]
+        self.v_edges = [[None] * (cols + 1) for _ in range(rows)]
+
+        self.box_by_edge_count = [set() for _ in range(5)]
+        self.available_edges   = set()
+
+        self._build()
+
+    def _build(self):
+        # Boxes
+        for r in range(self.rows):
+            for c in range(self.cols):
+                box = _Box(len(self.boxes), r, c)
+                self.boxes.append(box)
+                self.box_by_edge_count[0].add(box.id)
+
+        # Horizontal edges
+        for r in range(self.rows + 1):
+            for c in range(self.cols):
+                edge = self._make_edge(self.points[r][c], self.points[r][c + 1], "h")
+                self.h_edges[r][c] = edge
+                if r < self.rows:
+                    self._connect(self.boxes[r * self.cols + c], edge, "top")
+                if r > 0:
+                    self._connect(self.boxes[(r - 1) * self.cols + c], edge, "bottom")
+
+        # Vertical edges
+        for r in range(self.rows):
+            for c in range(self.cols + 1):
+                edge = self._make_edge(self.points[r][c], self.points[r + 1][c], "v")
+                self.v_edges[r][c] = edge
+                if c < self.cols:
+                    self._connect(self.boxes[r * self.cols + c], edge, "left")
+                if c > 0:
+                    self._connect(self.boxes[r * self.cols + (c - 1)], edge, "right")
+
+        self.available_edges = set(range(len(self.edges)))
+
+    def _make_edge(self, p1, p2, direction):
+        edge = _Edge(len(self.edges), p1, p2, direction)
+        self.edges.append(edge)
+        p1.edges.append(edge)
+        p2.edges.append(edge)
+        return edge
+
+    def _connect(self, box, edge, side):
+        box.edges[side] = edge
+        edge.boxes.append(box)
+
+    def mark_occupied(self, edge_id: int):
+        """Mark a single edge as already occupied (for board reconstruction)."""
+        edge = self.edges[edge_id]
+        if edge.occupied:
+            return
+        edge.occupied = True
+        edge.p1.degree += 1
+        edge.p2.degree += 1
+        self.available_edges.discard(edge_id)
+        for box in edge.boxes:
+            self.box_by_edge_count[box.edge_count].discard(box.id)
+            box.edge_count += 1
+            self.box_by_edge_count[box.edge_count].add(box.id)
+
+    # ------------------------------------------------------------------
+    # Rule helpers
+    # ------------------------------------------------------------------
+
+    def forced_completion_line(self, n_lines: int, size: int) -> Optional[int]:
+        """
+        Rule 1: Return the game-line index of the first unoccupied edge that
+        would complete a 3-edge box, or None if no such box exists.
+        """
+        for box_id in self.box_by_edge_count[3]:
+            box = self.boxes[box_id]
+            for edge in box.edges.values():
+                if not edge.occupied:
+                    return self._edge_to_line(edge, n_lines, size)
+        return None
+
+    def safe_isolated_lines(self, n_lines: int, size: int) -> List[int]:
+        """
+        Rule 2: Return game-line indices of edges that are completely isolated:
+          - unoccupied
+          - both endpoints have degree 0
+          - all adjacent boxes have 0 edges
+        """
+        result = []
+        for edge_id in self.available_edges:
+            edge = self.edges[edge_id]
+            if edge.p1.degree != 0 or edge.p2.degree != 0:
+                continue
+            if all(box.edge_count == 0 for box in edge.boxes):
+                result.append(self._edge_to_line(edge, n_lines, size))
+        return result
+
+    def _edge_to_line(self, edge: '_Edge', n_lines: int, size: int) -> int:
+        """Convert a _Edge object to the flat game line index."""
+        if edge.direction == "h":
+            # h_edges[r][c] → line = r * size + c
+            r, c = edge.p1.row, edge.p1.col
+            return r * size + c
+        else:
+            # v_edges[r][c] → line = N//2 + c * size + r
+            # p1 = points[r][c], p2 = points[r+1][c]
+            r, c = edge.p1.row, edge.p1.col
+            return n_lines // 2 + c * size + r
+
 
 # ====================================================================
 # BASE AGENT
@@ -100,16 +259,16 @@ class DotsAndBoxesGame:
         if line < int(self.N_LINES / 2):
             i = line // self.SIZE
             j = line % self.SIZE
-            if i == 0:          return [(i, j)]
+            if i == 0:           return [(i, j)]
             elif i == self.SIZE: return [(i - 1, j)]
-            else:               return [(i - 1, j), (i, j)]
+            else:                return [(i - 1, j), (i, j)]
         else:
             line = line - int(self.N_LINES / 2)
             j = line // self.SIZE
             i = line % self.SIZE
-            if j == 0:          return [(i, j)]
+            if j == 0:           return [(i, j)]
             elif j == self.SIZE: return [(i, j - 1)]
-            else:               return [(i, j - 1), (i, j)]
+            else:                return [(i, j - 1), (i, j)]
 
     def get_lines_of_box(self, box: Tuple[int, int]) -> List[int]:
         i, j = box
@@ -121,18 +280,16 @@ class DotsAndBoxesGame:
 
 
 # ====================================================================
-# UCLA BOT V3
+# UCLA BOT V3  (with embedded Board_Manager rules)
 # ====================================================================
 
 class UCLABot_v3(BaseAgent):
     """
-    Strategy:
-    1. Take all safe immediately capturable boxes.
-    2. If 3-sided boxes remain:
-       - If safe moves exist: take all 3-sided boxes then play safe.
-       - Else: sacrifice (double-cross) to keep control.
-    3. Play safe move (singleton / doubleton heuristic).
-    4. Fall back to any free edge.
+    Strategy (priority order):
+    0. Rule 1 — Forced completion: if any box has 3 edges, take the 4th. Always correct.
+    1. Rule 2 — Safe isolated: if any edge touches only 0-edge boxes and both
+       endpoints are degree 0, pick one at random. Zero exposure created.
+    2. Original UCLA v3 logic (chain analysis, double-cross sacrifice, safe heuristics).
 
     The algorithm may queue multiple moves (chain captures) per call.
     The CodingGame loop consumes exactly one move per turn.
@@ -142,10 +299,52 @@ class UCLABot_v3(BaseAgent):
         super().__init__(name)
         self.move_queue: List[int] = []
 
+    # ------------------------------------------------------------------
+    # Build Board_Manager from current game state
+    # ------------------------------------------------------------------
+
+    def _build_bm(self, game: DotsAndBoxesGame) -> '_BoardManager':
+        bm = _BoardManager(rows=game.SIZE, cols=game.SIZE)
+        # Mark every occupied line in the BM
+        for line_idx in range(game.N_LINES):
+            if game.l[line_idx] != 0:
+                # Convert line_idx → edge_id (same formula as _build())
+                half = game.N_LINES // 2
+                size = game.SIZE
+                if line_idx < half:
+                    r = line_idx // size
+                    c = line_idx % size
+                    edge = bm.h_edges[r][c]
+                else:
+                    v_idx = line_idx - half
+                    c = v_idx // size
+                    r = v_idx % size
+                    edge = bm.v_edges[r][c]
+                bm.mark_occupied(edge.id)
+        return bm
+
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
+
     def get_move(self, game: DotsAndBoxesGame) -> int:
         if self.move_queue:
             return self.move_queue.pop(0)
 
+        # Build the structural board view for this turn
+        bm = self._build_bm(game)
+
+        # ── Rule 1: forced completion ──────────────────────────────────
+        forced = bm.forced_completion_line(game.N_LINES, game.SIZE)
+        if forced is not None:
+            return forced
+
+        # ── Rule 2: safe isolated random (first half only) ────────────
+        isolated = bm.safe_isolated_lines(game.N_LINES, game.SIZE)
+        if isolated and len(isolated) > 5:          
+            return random.choice(isolated)
+
+        # ── UCLA v3 original logic ─────────────────────────────────────
         self.size = game.SIZE
         self.m = self.size
         self.n = self.size

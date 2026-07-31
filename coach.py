@@ -319,7 +319,10 @@ def worker_execute_episode_chunk(worker_args):
             if is_latest_turn or opp_type == "self":
                 pi = mcts_latest.play(game, temp=temp, add_root_noise=True,
                                       last_action=last_action_for_mcts)
-                depths.append(mcts_latest.max_depth_reached)
+                # max_depth_reached == -1 means a rule-based shortcut was used;
+                # exclude those from the MCTS depth average.
+                if mcts_latest.max_depth_reached >= 0:
+                    depths.append(mcts_latest.max_depth_reached)
 
                 canonical_lines = game.get_canonical_lines()
                 canonical_boxes = game.get_canonical_boxes()

@@ -128,9 +128,11 @@ def _worker_play_single(worker_args):
         cur_player = game.current_player
         action = players[cur_player](game)
         
-        # If the candidate just played, record its max search depth for this move
+        # If the candidate just played, record its max search depth.
+        # max_depth_reached == -1 means a rule-based shortcut fired; exclude from avg.
         if (p1_starts and cur_player == 1) or (not p1_starts and cur_player == -1):
-            depths.append(mcts_cand.max_depth_reached)
+            if mcts_cand.max_depth_reached >= 0:
+                depths.append(mcts_cand.max_depth_reached)
             
         game.execute_move(action)
 

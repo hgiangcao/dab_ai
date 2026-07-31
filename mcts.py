@@ -93,12 +93,13 @@ class MCTS:
             self._root = root
             return [0.0] * root.s.N_LINES
 
-        # ── Rule 1: forced completion ──────────────────────────────────────────
+        # ── Rule 1: forced completion ─────────────────────────────────────────
         forced = self._forced_completion_moves(root.s)
         if forced:
             probs = np.zeros(root.s.N_LINES, dtype=np.float64)
             # Pick one forced move (first is fine — all complete a box)
             probs[forced[0]] = 1.0
+            self.max_depth_reached = -1   # sentinel: rule-based, exclude from avg depth
             self._root = root
             return probs.tolist()
 
@@ -108,6 +109,7 @@ class MCTS:
             probs = np.zeros(root.s.N_LINES, dtype=np.float64)
             chosen = isolated[int(np.random.randint(len(isolated)))]
             probs[chosen] = 1.0
+            self.max_depth_reached = -1   # sentinel: rule-based, exclude from avg depth
             self._root = root
             return probs.tolist()
 
