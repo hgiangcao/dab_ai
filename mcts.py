@@ -62,14 +62,22 @@ class MCTS:
         """
         Run MCTS from the current game_state and return a policy vector.
 
-        Parameters
-        ----------
-        game_state    : current DotsAndBoxesGame
-        temp          : temperature for move selection
-        add_root_noise: add Dirichlet noise at root (self-play only)
-        last_action   : the move that was just played on the board
-                        (used to advance the cached tree; pass None for the
-                        very first move of a game or after reset_tree()).
+        Before MCTS we apply two rule-based shortcuts:
+
+        Rule 1 – Forced completion (priority 0):
+            If any box has 3 edges occupied, complete it immediately.
+            No search needed — this is always correct.
+
+        Rule 2 – Safe isolated move (priority 1):
+            Among edges adjacent only to 0-edge boxes AND where both
+            endpoints have degree 0 (drawing it creates zero new exposure),
+            pick uniformly at random.  These moves are strategically neutral
+            and waste no MCTS budget.
+
+        Rule 3 – MCTS with tier-biased prior:
+            Explore 0-edge-adjacent moves first, 1/2-edge-adjacent moves
+            later, using a multiplicative prior boost applied on top of the
+            NN policy.  Within the same tier MCTS UCB takes over.
         """
         # Advance (or create) the root using the tree from the previous move
         root = self._advance_root(last_action, game_state)
@@ -85,6 +93,25 @@ class MCTS:
             self._root = root
             return [0.0] * root.s.N_LINES
 
+        # ── Rule 1: forced completion ──────────────────────────────────────────
+        forced = self._forced_completion_moves(root.s)
+        if forced:
+            probs = np.zeros(root.s.N_LINES, dtype=np.float64)
+            # Pick one forced move (first is fine — all complete a box)
+            probs[forced[0]] = 1.0
+            self._root = root
+            return probs.tolist()
+
+        # ── Rule 2: safe isolated move ─────────────────────────────────────────
+        isolated = self._safe_isolated_moves(root.s)
+        if isolated:
+            probs = np.zeros(root.s.N_LINES, dtype=np.float64)
+            chosen = isolated[int(np.random.randint(len(isolated)))]
+            probs[chosen] = 1.0
+            self._root = root
+            return probs.tolist()
+
+        # ── Rule 3: MCTS with tier-biased prior ────────────────────────────────
         dirichlet_noise = None
         if add_root_noise and self.dirichlet_eps > 0:
             dirichlet_noise = np.zeros((root.s.N_LINES,), dtype=np.float64)
@@ -244,12 +271,97 @@ class MCTS:
 
     def _root_policy(self, node: AZNode, valid_moves: list, dirichlet_noise: np.ndarray = None) -> np.ndarray:
         # node.P is already normalized and masked from leaf expansion.
-        # Only re-mix if we have Dirichlet noise to add.
+        # Apply tier-based multiplier so 0-edge moves are explored first,
+        # then 1/2-edge moves — within the same tier MCTS UCB governs.
+        P = node.P
+        tier_weights = self._tier_weights(node.s, valid_moves, node.s.N_LINES)
+        P = P * tier_weights
+        total = float(P.sum())
+        if total > 0:
+            P = P / total
+        else:
+            P = self._uniform_policy(node.s.N_LINES, valid_moves)
         if dirichlet_noise is None:
-            return node.P
-        base_policy = self._mask_and_normalize_policy(node.P, node.s.N_LINES, valid_moves)
-        policy = (1.0 - self.dirichlet_eps) * base_policy + self.dirichlet_eps * dirichlet_noise
+            return P
+        policy = (1.0 - self.dirichlet_eps) * P + self.dirichlet_eps * dirichlet_noise
         return self._mask_and_normalize_policy(policy, node.s.N_LINES, valid_moves)
+
+    # ------------------------------------------------------------------
+    # Rule-based helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _forced_completion_moves(game_state) -> list:
+        """
+        Return all valid line indices that would complete a 3-edge box.
+        These are deterministically correct moves — no search needed.
+        """
+        bm = game_state.board_manager
+        lm = game_state._line_to_bm_edge
+        forced = []
+        three_edge_box_ids = bm.box_by_edge_count[3]   # O(1) set lookup
+        if not three_edge_box_ids:
+            return forced
+        # Collect unoccupied edges of every 3-edge box
+        for box_id in three_edge_box_ids:
+            box = bm.boxes[box_id]
+            for edge in box.edges.values():
+                if not edge.occupied:
+                    # Find its line index (reverse map via id)
+                    forced.append(edge.id)  # edge.id == position in bm.edges
+        # Convert bm edge IDs to game line indices
+        edge_id_to_line = {e.id: line for line, e in lm.items()}
+        return [edge_id_to_line[eid] for eid in forced if eid in edge_id_to_line]
+
+    @staticmethod
+    def _safe_isolated_moves(game_state) -> list:
+        """
+        Return line indices that are 'safe isolated' moves:
+          - The edge is unoccupied
+          - Both its endpoints have degree 0 (drawing it creates no new
+            chain exposure)
+          - ALL adjacent boxes have 0 edges currently
+        These moves are strategically neutral early-game plays.
+        """
+        bm  = game_state.board_manager
+        lm  = game_state._line_to_bm_edge
+        safe = []
+        edge_id_to_line = {e.id: line for line, e in lm.items()}
+        for edge_id in bm.available_edges:
+            edge = bm.edges[edge_id]
+            # Isolated: both endpoints untouched
+            if edge.p1.degree != 0 or edge.p2.degree != 0:
+                continue
+            # All adjacent boxes must have 0 edges
+            if all(box.edge_count == 0 for box in edge.boxes):
+                line_idx = edge_id_to_line.get(edge_id)
+                if line_idx is not None:
+                    safe.append(line_idx)
+        return safe
+
+    @staticmethod
+    def _tier_weights(game_state, valid_moves: list, n_lines: int) -> np.ndarray:
+        """
+        Build a per-move multiplicative weight vector based on the maximum
+        edge-count of adjacent boxes:
+
+          Tier 0  (0-edge adjacent)  → weight 4.0   (explore first)
+          Tier 1  (1-edge adjacent)  → weight 1.0
+          Tier 2  (2-edge adjacent)  → weight 1.0
+          Tier 3+ (3-edge adjacent)  → weight 0.0   (should be forced; skip)
+
+        Weights are applied multiplicatively on top of the NN prior so that
+        within the same tier, the NN policy and UCB govern selection.
+        """
+        TIER_W = {0: 4.0, 1: 1.0, 2: 1.0, 3: 0.0, 4: 0.0}
+        bm  = game_state.board_manager
+        lm  = game_state._line_to_bm_edge
+        weights = np.zeros(n_lines, dtype=np.float64)
+        for line_idx in valid_moves:
+            edge = lm[line_idx]
+            max_ec = max((box.edge_count for box in edge.boxes), default=0)
+            weights[line_idx] = TIER_W.get(max_ec, 1.0)
+        return weights
 
 
 from agent_interface import BaseAgent

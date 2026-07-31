@@ -343,9 +343,17 @@ def training_loop(load_checkpoint=None):
         if 'optimizer' in checkpoint:
             global_nnet.optimizer.load_state_dict(checkpoint['optimizer'])
             print(f"Restored optimizer state from {load_path}.")
-        if 'scheduler' in checkpoint:
+        if 'scheduler' in checkpoint and checkpoint['scheduler']:
             global_nnet.scheduler.load_state_dict(checkpoint['scheduler'])
-            print(f"Restored scheduler state from {load_path}.")
+            # Clamp LR to the configured eta_min in case the checkpoint was saved
+            # with an older scheduler that had a lower or missing eta_min setting.
+            eta_min = global_nnet.scheduler.eta_min
+            for pg in global_nnet.optimizer.param_groups:
+                if pg['lr'] < eta_min:
+                    print(f"WARNING: Loaded LR {pg['lr']:.2e} is below eta_min={eta_min:.2e}. Clamping to eta_min.")
+                    pg['lr'] = eta_min
+            resumed_lr = global_nnet.optimizer.param_groups[0]['lr']
+            print(f"Restored scheduler state from {load_path}. Current LR: {resumed_lr:.2e}")
         else:
             # No saved scheduler state (pre-scheduler checkpoint).
             # Fast-forward the scheduler to match iterations already completed

@@ -2,6 +2,7 @@ from typing import Tuple, List
 from random import randint
 import math
 import numpy as np
+from game_board_manager import Board_Manager
 
 
 class DotsAndBoxesGame:
@@ -67,8 +68,35 @@ class DotsAndBoxesGame:
 
         self.box_fill_count = [0] * self.N_BOXES
 
+        # Board manager: rich structural view of the board (edges, boxes, points)
+        self.board_manager = Board_Manager(rows=size, cols=size)
+        # Map flat line index → Board_Manager Edge object
+        self._line_to_bm_edge = self._build_line_to_bm_edge()
+
         # undo stack: each entry is (line, boxes_captured, player_before, result_before)
         self._history: list = []
+
+    def _build_line_to_bm_edge(self):
+        """
+        Map each flat game line index to the corresponding Board_Manager Edge object
+        using the h_edges / v_edges matrices (O(1) lookup, no manual iteration).
+
+        Horizontal: line = r * SIZE + c  ->  h_edges[r][c]
+        Vertical:   line = N//2 + c * SIZE + r  ->  v_edges[r][c]
+        """
+        mapping = {}
+        bm   = self.board_manager
+        half = self.N_LINES // 2
+
+        for r in range(self.SIZE + 1):
+            for c in range(self.SIZE):
+                mapping[r * self.SIZE + c] = bm.h_edges[r][c]
+
+        for r in range(self.SIZE):
+            for c in range(self.SIZE + 1):
+                mapping[half + c * self.SIZE + r] = bm.v_edges[r][c]
+
+        return mapping
 
     """
     Class setters.
@@ -90,13 +118,13 @@ class DotsAndBoxesGame:
     """
     def execute_move(self, line: int):
         # Save state for undo before modifying anything
-        player_before  = self.current_player
-        result_before  = self.result
+        player_before = self.current_player
+        result_before = self.result
 
         # execute move means drawing the line
         self.draw_line(line)
 
-        # check whether a new box was captured
+        # Check for box captures and update fill counts
         boxes_captured = []
         for box_idx in self.line_to_boxes[line]:
             self.box_fill_count[box_idx] += 1
@@ -105,13 +133,16 @@ class DotsAndBoxesGame:
                 self.capture_box(row=row, col=col)
                 boxes_captured.append((row, col))
 
+        # Board_Manager update: uses edge.boxes internally — no external IDs needed
+        bm_edge_id = self._line_to_bm_edge[line].id
+        self.board_manager.apply_move(bm_edge_id, self.current_player)
+
         # switch current player when the player did not capture a box
         if not boxes_captured:
             self.switch_current_player()
         else:
             self.check_finished()
 
-        # Push undo record
         self._history.append((line, boxes_captured, player_before, result_before))
 
     def undo_move(self):
@@ -124,15 +155,18 @@ class DotsAndBoxesGame:
         self.current_player = player_before
         self.result         = result_before
 
-        # Un-draw the line
+        # Un-draw the line and revert fill counts
         self.l[line] = 0.0
-
         for box_idx in self.line_to_boxes[line]:
             self.box_fill_count[box_idx] -= 1
 
         # Un-capture any boxes
         for box in boxes_captured:
             self.b[box[0]][box[1]] = 0.0
+
+        # Board_Manager rollback: auto-detects captured boxes via edge.boxes
+        bm_edge_id = self._line_to_bm_edge[line].id
+        self.board_manager.undo_move(bm_edge_id)
 
     def clone(self, track_history: bool = True) -> 'DotsAndBoxesGame':
         """Fast clone: copies only essential mutable state, avoiding copy.deepcopy overhead.
@@ -154,6 +188,15 @@ class DotsAndBoxesGame:
         c.box_to_lines = self.box_to_lines
         c.box_fill_count = list(self.box_fill_count)
         c._history = list(self._history) if track_history else []
+
+        # Deep-copy Board_Manager state
+        import copy
+        c.board_manager = copy.deepcopy(self.board_manager)
+        # Rebuild edge mapping pointing at the cloned board_manager's edges
+        c._line_to_bm_edge = {}
+        for line_idx, orig_edge in self._line_to_bm_edge.items():
+            c._line_to_bm_edge[line_idx] = c.board_manager.edges[orig_edge.id]
+
         return c
 
 
