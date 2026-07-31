@@ -35,7 +35,7 @@ def get_current_model_dir():
 # Training defaults
 # ===================
 
-BATCH_SIZE = 512
+BATCH_SIZE = 1024
 EPOCHS = 10
 LEARNING_RATE = 0.0005
 MAX_WORKERS = 8
