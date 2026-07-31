@@ -341,7 +341,7 @@ class UCLABot_v3(BaseAgent):
 
         # ── Rule 2: safe isolated random (first half only) ────────────
         isolated = bm.safe_isolated_lines(game.N_LINES, game.SIZE)
-        if isolated and len(isolated) > 5:          
+        if isolated and len(isolated) > 3:          
             return random.choice(isolated)
 
         # ── UCLA v3 original logic ─────────────────────────────────────
