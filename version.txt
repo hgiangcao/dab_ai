@@ -1,5 +1,5 @@
-run: run_67
-last_updated_model: 0
-current_phase: 0
+run: run_70
+last_updated_model: 6
+current_phase: 1
 phase_iteration: 3
 finish_pretrain: True

@@ -223,6 +223,7 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     merged_path = replay_manager.merge_replay(claimed_files)
     candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
     dynamic_epochs = 2 * len(claimed_files)
+    print(f"Epochs this iteration: {dynamic_epochs}  ({len(claimed_files)} new files × 2)")
     losses = train_network(replay_data, candidate_path, nnet, epochs=dynamic_epochs)
     
     if writer:
