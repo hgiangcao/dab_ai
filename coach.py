@@ -362,30 +362,13 @@ def worker_execute_episode_chunk(worker_args):
         r = game.result
         avg_depth = sum(depths) / len(depths) if depths else 0
 
-        # ── Net Score Delta + Terminal Outcome reward ──────────────────────────
-        # R_t = step_delta_t + M * terminal_result
-        #   step_delta_t  = agent_boxes_t - opponent_boxes_t  (from canonical view)
-        #   terminal_result = +1 win / -1 loss / 0 draw  (from canonical view)
-        # Normalise to [-1, 1] by dividing by (N_BOXES + M).
-        M          = 10
-        N_BOXES    = game.N_BOXES      # 25 for 5x5
-        norm_scale = float(N_BOXES + M)  # 35 for 5x5 → keeps values in [-1, 1]
-
         final_examples = []
         for x in train_examples:
             player_at_step    = x[2]   # 1 or -1
-            agent_boxes_t     = x[4]
-            opponent_boxes_t  = x[5]
 
             # Terminal result from this player's perspective
             terminal = r if player_at_step == 1 else -r
-
-            # Step-wise delta: how many more boxes this player had vs opponent at this moment
-            step_delta = agent_boxes_t - opponent_boxes_t
-
-            # Combined reward, normalised
-            val = (step_delta + M * terminal) / norm_scale
-            val = float(np.clip(val, -1.0, 1.0))
+            val = float(terminal)
 
             final_examples.append((x[0], x[1], x[3], val))
 

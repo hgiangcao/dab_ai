@@ -194,7 +194,7 @@ class NNetWrapper:
             # calculate losses
             l_pi = self.loss_pi(target_pis, out_pi)
             l_v = self.loss_v(target_vs, out_v)
-            total_loss = l_pi + (100 * l_v)
+            total_loss = l_pi + l_v
             
             # calculate entropy of output policy
             probs = torch.exp(out_pi)
