@@ -180,6 +180,9 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
                 print(f"===========================================================\n")
                 model_manager.advance_curriculum_phase()
                 phase_advanced = True
+                if replay_buffer is not None:
+                    replay_buffer.clear()
+                    print("Replay buffer flushed upon curriculum phase advance.")
         
     # 3. Load the replay buffer from training/
     new_data = replay_manager.load_replay_buffer(claimed_files)
@@ -226,6 +229,7 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     print(f"Epochs this iteration: {dynamic_epochs}  ({len(claimed_files)} new files × 2)")
     losses = train_network(replay_data, candidate_path, nnet, epochs=dynamic_epochs)
     
+    print(f"DEBUG LOGS BEFORE WRITER: policy_loss = {losses['pi_loss']}, policy_entropy = {losses['entropy']}")
     if writer:
         current_lr = nnet.optimizer.param_groups[0]['lr']
         writer.add_scalar('Log/Policy_Loss', losses["pi_loss"], iteration)
