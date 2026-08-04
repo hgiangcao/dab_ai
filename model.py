@@ -218,13 +218,16 @@ class NNetWrapper:
     def predict(self, board):
         """
         Outputs policy and value for a single board state.
-        board: formatted state representation (channels, x, y)
+        board: formatted state representation (channels, x, y), float32 numpy array
         """
-        board = torch.FloatTensor(board.astype(np.float64)).unsqueeze(0).to(self.device)
-        self.nnet.eval()
-        
+        # Use float32 directly (board is already float32) — avoids wasteful float64 round-trip.
+        # torch.from_numpy is zero-copy; unsqueeze adds the batch dimension.
+        tensor = torch.from_numpy(np.ascontiguousarray(board, dtype=np.float32)).unsqueeze(0)
+        if self.device.type != 'cpu':
+            tensor = tensor.to(self.device, non_blocking=True)
+        # NOTE: nnet.eval() is called once after model load, NOT here in the hot path.
         with torch.no_grad():
-            pi, v = self.nnet(board)
+            pi, v = self.nnet(tensor)
 
         # Return probability distribution over actions and scalar value
         return torch.exp(pi).data.cpu().numpy()[0], v.data.cpu().numpy()[0]

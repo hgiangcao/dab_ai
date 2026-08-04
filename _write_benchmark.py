@@ -1,3 +1,7 @@
+"""Helper: writes the clean benchmark_mcts.py file."""
+import pathlib
+
+content = '''\
 import os
 import sys
 import time
@@ -60,12 +64,12 @@ def run_benchmark_for_state(num_moves, mcts, n_simulations):
     total_lines = 60
     empty_lines = total_lines - num_moves
 
-    print("\n" + "=" * 65)
+    print("\\n" + "=" * 65)
     print(f"  BENCHMARK  |  pre-filled moves: {num_moves}  |  empty lines: {empty_lines}")
     print("=" * 65)
 
     # Test 1: single mcts.play() call
-    print(f"\n[Test 1] Single move via mcts.play() with {n_simulations} sims ...")
+    print(f"\\n[Test 1] Single move via mcts.play() with {n_simulations} sims ...")
     game = get_prefilled_game(num_moves)
     mcts.reset_tree()
 
@@ -87,7 +91,7 @@ def run_benchmark_for_state(num_moves, mcts, n_simulations):
     print(f"  -> Unique nodes explored : {unique_nodes}")
 
     # Test 2: full game, fresh tree each move
-    print(f"\n[Test 2] Full game timing (fresh tree each move) ...")
+    print(f"\\n[Test 2] Full game timing (fresh tree each move) ...")
     game2 = get_prefilled_game(num_moves)
 
     move_times      = []
@@ -120,16 +124,16 @@ def run_benchmark_for_state(num_moves, mcts, n_simulations):
     print(f"  -> Max unique nodes (move)  : {int(np.max(unique_per_move))}")
 
     return {
-        't1_move_ms':        elapsed_ms,
-        't1_max_depth':      max_depth,
-        't1_avg_depth':      avg_depth,
-        't1_unique_nodes':   unique_nodes,
-        't2_avg_move_ms':    float(np.mean(move_times)),
-        't2_avg_max_depth':  float(np.mean(depths_max)),
-        't2_avg_leaf_depth': float(np.mean(depths_avg_list)),
-        't2_avg_nodes':      float(np.mean(unique_per_move)),
-        't2_max_nodes':      int(np.max(unique_per_move)),
-        't2_n_moves':        n_moves,
+        \'t1_move_ms\':        elapsed_ms,
+        \'t1_max_depth\':      max_depth,
+        \'t1_avg_depth\':      avg_depth,
+        \'t1_unique_nodes\':   unique_nodes,
+        \'t2_avg_move_ms\':    float(np.mean(move_times)),
+        \'t2_avg_max_depth\':  float(np.mean(depths_max)),
+        \'t2_avg_leaf_depth\': float(np.mean(depths_avg_list)),
+        \'t2_avg_nodes\':      float(np.mean(unique_per_move)),
+        \'t2_max_nodes\':      int(np.max(unique_per_move)),
+        \'t2_n_moves\':        n_moves,
     }
 
 
@@ -138,21 +142,21 @@ def main():
     print("=" * 65)
 
     dummy_game = DotsAndBoxesGame(size=5)
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = \'cuda\' if torch.cuda.is_available() else \'cpu\'
     print(f"Device : {device}")
 
     eval_args = dotdict({
-        'lr':              config.LEARNING_RATE,
-        'epochs':          config.EPOCHS,
-        'batch_size':      config.BATCH_SIZE,
-        'num_channels':    256,
-        'num_res_blocks':  10,
-        'l2_reg':          1e-4,
-        'n_simulations':   100,
-        'c_puct':          config.MCTS_C_PUCT,
-        'dirichlet_eps':   0.0,
-        'dirichlet_alpha': config.MCTS_DIRICHLET_ALPHA,
-        'device':          device,
+        \'lr\':              config.LEARNING_RATE,
+        \'epochs\':          config.EPOCHS,
+        \'batch_size\':      config.BATCH_SIZE,
+        \'num_channels\':    256,
+        \'num_res_blocks\':  10,
+        \'l2_reg\':          1e-4,
+        \'n_simulations\':   100,
+        \'c_puct\':          config.MCTS_C_PUCT,
+        \'dirichlet_eps\':   0.0,
+        \'dirichlet_alpha\': config.MCTS_DIRICHLET_ALPHA,
+        \'device\':          device,
     })
 
     nnet = NNetWrapper(dummy_game, eval_args)
@@ -160,7 +164,7 @@ def main():
     checkpoint_dir  = config.get_current_model_dir()
     pretrained_path = os.path.join(checkpoint_dir, "pretrained.pth.tar")
     candidate_path  = os.path.join(checkpoint_dir, "checkpoint_candidate.pth.tar")
-    best_path       = "best.pth.tar"
+    best_path       = os.path.join(checkpoint_dir, "best.pth.tar")
 
     loaded = False
     for path in [pretrained_path, candidate_path, best_path]:
@@ -168,7 +172,7 @@ def main():
             try:
                 print(f"Loading weights from {path} ...")
                 state = torch.load(path, map_location=device, weights_only=False)
-                nnet.nnet.load_state_dict(state['state_dict'] if 'state_dict' in state else state)
+                nnet.nnet.load_state_dict(state[\'state_dict\'] if \'state_dict\' in state else state)
                 loaded = True
                 break
             except Exception as e:
@@ -179,7 +183,7 @@ def main():
 
     nnet.nnet.eval()
 
-    print("\nWarming up ...")
+    print("\\nWarming up ...")
     warmup_params = {
         "n_simulations":   100,
         "c_puct":          config.MCTS_C_PUCT,
@@ -192,13 +196,13 @@ def main():
     warmup_mcts.reset_tree()
     print("Warm-up complete.")
 
-    sim_counts = [100, 200, 500]
+    sim_counts = [100, 200, 500, 1000]
     results = {}
 
     for n_sims in sim_counts:
-        print(f"\n{'#'*65}")
+        print(f"\\n{\'#\'*65}")
         print(f"#  n_simulations = {n_sims}")
-        print(f"{'#'*65}")
+        print(f"{\'#\'*65}")
         mcts_params = {
             "n_simulations":   n_sims,
             "c_puct":          config.MCTS_C_PUCT,
@@ -211,30 +215,35 @@ def main():
     col = 10
     lbl = 38
 
-    print("\n" + "=" * 78)
+    print("\\n" + "=" * 78)
     print("          ALPHAZERO BENCHMARK SUMMARY (from empty 5x5 board)")
     print("=" * 78)
-    header = f"{'Metric':<{lbl}}" + "".join(f"{str(s)+' sims':^{col}}" for s in sim_counts)
+    header = f"{\'Metric\':<{lbl}}" + "".join(f"{str(s)+\' sims\':^{col}}" for s in sim_counts)
     print(header)
     print("-" * 78)
 
     def row(label, fmt_fn):
         return f"{label:<{lbl}}" + "".join(f"{fmt_fn(results[s]):^{col}}" for s in sim_counts)
 
-    print(row("Single move time (ms)",         lambda r: f"{r['t1_move_ms']:.1f}"))
-    print(row("  time / simulation (ms)",      lambda r: f"{r['t1_move_ms'] / r['t1_unique_nodes']:.4f}" if r['t1_unique_nodes'] else "N/A"))
-    print(row("  max search depth",            lambda r: str(r['t1_max_depth'])))
-    print(row("  avg leaf depth",              lambda r: f"{r['t1_avg_depth']:.2f}"))
-    print(row("  unique nodes explored",       lambda r: str(r['t1_unique_nodes'])))
+    print(row("Single move time (ms)",         lambda r: f"{r[\'t1_move_ms\']:.1f}"))
+    print(row("  time / simulation (ms)",      lambda r: f"{r[\'t1_move_ms\'] / r[\'t1_unique_nodes\']:.4f}" if r[\'t1_unique_nodes\'] else "N/A"))
+    print(row("  max search depth",            lambda r: str(r[\'t1_max_depth\'])))
+    print(row("  avg leaf depth",              lambda r: f"{r[\'t1_avg_depth\']:.2f}"))
+    print(row("  unique nodes explored",       lambda r: str(r[\'t1_unique_nodes\'])))
     print("-" * 78)
-    print(row("Full-game avg move time (ms)",  lambda r: f"{r['t2_avg_move_ms']:.1f}"))
-    print(row("  avg max depth / move",        lambda r: f"{r['t2_avg_max_depth']:.2f}"))
-    print(row("  avg leaf depth / move",       lambda r: f"{r['t2_avg_leaf_depth']:.2f}"))
-    print(row("  avg unique nodes / move",     lambda r: f"{r['t2_avg_nodes']:.1f}"))
-    print(row("  max unique nodes (any move)", lambda r: str(r['t2_max_nodes'])))
-    print(row("  moves played",               lambda r: str(r['t2_n_moves'])))
+    print(row("Full-game avg move time (ms)",  lambda r: f"{r[\'t2_avg_move_ms\']:.1f}"))
+    print(row("  avg max depth / move",        lambda r: f"{r[\'t2_avg_max_depth\']:.2f}"))
+    print(row("  avg leaf depth / move",       lambda r: f"{r[\'t2_avg_leaf_depth\']:.2f}"))
+    print(row("  avg unique nodes / move",     lambda r: f"{r[\'t2_avg_nodes\']:.1f}"))
+    print(row("  max unique nodes (any move)", lambda r: str(r[\'t2_max_nodes\'])))
+    print(row("  moves played",               lambda r: str(r[\'t2_n_moves\'])))
     print("=" * 78)
 
 
 if __name__ == "__main__":
     main()
+'''
+
+out = pathlib.Path(r"c:\Users\user\Downloads\dab_ai\benchmark_mcts.py")
+out.write_text(content, encoding="utf-8")
+print(f"Written {len(content.splitlines())} lines to {out}")

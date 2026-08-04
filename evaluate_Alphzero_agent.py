@@ -82,10 +82,18 @@ class AlphaZeroAgent(BaseAgent):
             
         self.net = _nnet_cache[model_path]
         self.mcts = MCTS(self.net, self.eval_args)
+        self._last_action: int = None
+
+    def reset(self):
+        """Reset MCTS tree. Must be called at the start of each new game."""
+        self.mcts.reset_tree()
+        self._last_action = None
 
     def get_move(self, game_state: DotsAndBoxesGame) -> int:
-        pi = self.mcts.play(game_state, temp=0)
-        return int(np.argmax(pi))
+        pi = self.mcts.play(game_state, temp=0, last_action=self._last_action)
+        action = int(np.argmax(pi))
+        self._last_action = action
+        return action
 
 def create_agent(name: str, size: int, model_path: str = "best.pth.tar", n_simulations: int = 200):
     if name == "Random":
@@ -131,9 +139,25 @@ def run_single_game(args):
     agent1_name, agent2_name, size, game_index, model_path, n_simulations = args
     from game import DotsAndBoxesGame
     import time
+
+    # Prevent PyTorch from spawning multiple OpenMP threads per worker.
+    # With N workers each using K threads, you get N*K threads on K cores → thrashing.
+    # Setting 1 thread per worker gives clean utilization.
+    try:
+        import torch
+        torch.set_num_threads(1)
+    except ImportError:
+        pass
     
     agent1 = create_agent(agent1_name, size, model_path, n_simulations)
     agent2 = create_agent(agent2_name, size, model_path, n_simulations)
+
+    # Reset MCTS trees so no stale state leaks across games
+    if hasattr(agent1, 'reset'):
+        agent1.reset()
+    if hasattr(agent2, 'reset'):
+        agent2.reset()
+
     starting_player = 1 if (game_index % 2 == 0) else -1
     game = DotsAndBoxesGame(size=size, starting_player=starting_player, early_stopping=True)
     
@@ -141,18 +165,26 @@ def run_single_game(args):
     a2_moves = 0
     a1_time = 0.0
     a2_time = 0.0
+    last_move = None  # track last move so MCTS tree-reuse can advance past opponent's turn
     
     while game.is_running():
         if game.current_player == 1:
             start_t = time.time()
+            # Inform agent1's tree of the opponent's last move before searching
+            if last_move is not None and hasattr(agent1, '_last_action'):
+                agent1._last_action = last_move
             move = agent1.get_move(game)
             a1_time += (time.time() - start_t)
             a1_moves += 1
         else:
             start_t = time.time()
+            # Inform agent2's tree of the opponent's last move before searching
+            if last_move is not None and hasattr(agent2, '_last_action'):
+                agent2._last_action = last_move
             move = agent2.get_move(game)
             a2_time += (time.time() - start_t)
             a2_moves += 1
+        last_move = move
         game.execute_move(move)
         
     return agent1_name, agent2_name, game.result, a1_moves, a1_time, a2_moves, a2_time
@@ -177,7 +209,7 @@ def main():
         # "Random",
         # "Greedy", 
         # "Greedy Chain",
-        "UCLABot_v3",
+        # "UCLABot_v3",
         "UCLABot_v6",
         # "SimpleBot",
         # "SimpleBot_v2",

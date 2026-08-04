@@ -136,33 +136,35 @@ class MCTS:
 
         # Leaf expansion: call NN once, cache policy and valid moves on this node
         if node.P is None:
-            h, v = node.s.l_to_h_v(node.s.get_canonical_lines())
             size = node.s.SIZE
+            sp1 = size + 1
 
-            c1 = np.zeros((size+1, size+1))
-            c1[:size+1, :size] = h
+            # Use pre-allocated buffer if available; create and cache it on first use.
+            # Clears to zero then fills in-place — avoids 8 numpy allocs per simulation.
+            buf = getattr(self, '_board_buf', None)
+            if buf is None or buf.shape != (4, sp1, sp1):
+                self._board_buf = np.zeros((4, sp1, sp1), dtype=np.float32)
+                buf = self._board_buf
+            else:
+                buf[:] = 0.0
 
-            c2 = np.zeros((size+1, size+1))
-            c2[:size, :size+1] = v
+            canonical_lines = node.s.get_canonical_lines()
+            h, v = node.s.l_to_h_v(canonical_lines)
+            buf[0, :sp1, :size] = h          # horizontal lines
+            buf[1, :size, :sp1] = v          # vertical lines
 
             canonical_boxes = node.s.get_canonical_boxes()
-            p1_boxes = np.where(canonical_boxes == 1, 1.0, 0.0)
-            c3 = np.zeros((size+1, size+1))
-            c3[:size, :size] = p1_boxes
+            buf[2, :size, :size] = np.where(canonical_boxes == 1, 1.0, 0.0)   # p1 boxes
+            buf[3, :size, :size] = np.where(canonical_boxes == -1, 1.0, 0.0)  # p2 boxes
 
-            p2_boxes = np.where(canonical_boxes == -1, 1.0, 0.0)
-            c4 = np.zeros((size+1, size+1))
-            c4[:size, :size] = p2_boxes
-
-            stacked_board = np.stack([c1, c2, c3, c4], axis=0)
-
-            p, v = self.model.predict(stacked_board)
+            p, v = self.model.predict(buf)
             v = float(np.asarray(v).reshape(-1)[0])
 
             # Cache valid_moves on the node — avoid redundant get_valid_moves() calls
             node.valid_moves = node.s.get_valid_moves()
             node.P = self._mask_and_normalize_policy(p, node.s.N_LINES, node.valid_moves)
             return v
+
 
         a = self.select(node, is_root, dirichlet_noise)
         child = node.children.get(a)  # O(1) dict lookup
@@ -181,7 +183,10 @@ class MCTS:
         a_max = -1
 
         # O(1) total_N lookup instead of O(children) sum()
-        N_sqrt = math.sqrt(node.total_N) if node.total_N > 0 else 1
+        # When total_N == 0 (first sim into this node), U = 0 for all actions,
+        # so the best action is determined purely by the prior P — matching the
+        # standard AlphaZero PUCT spec where sqrt(0) / (1+0) = 0.
+        N_sqrt = math.sqrt(node.total_N) if node.total_N > 0 else 0.0
 
         # Use cached valid_moves — no repeated get_valid_moves() call
         valid_moves = node.valid_moves
