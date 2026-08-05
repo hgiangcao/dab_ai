@@ -145,7 +145,7 @@ def run_single_matchup(args):
         agent2 = create_agent(agent2_name, size)
         # Alternate who starts to ensure fairness
         starting_player = 1 if (i % 2 == 0) else -1
-        game = DotsAndBoxesGame(size=size, starting_player=starting_player,early_stopping=True)
+        game = DotsAndBoxesGame(size=size, starting_player=starting_player,early_stopping=False)
         
         game_moves = []
         game_policies = []
@@ -222,7 +222,7 @@ def main():
     agent_names = [
         "Random", 
         "Greedy", 
-        "Greedy Chain",
+        # "Greedy Chain",
         # "Alpha-Beta (0.1s)", 
         # "Alpha-Beta (0.5s)", 
         # "Alpha-Beta v1 (0.1s)",
@@ -243,11 +243,11 @@ def main():
         # "UCLAAlphaBeta",
         # "UCLA_MCTS_100",
         # "UCLA_MCTS_200",
-        # "SimpleBot",
-        # "SimpleBot_v2",
+        "SimpleBot",
+        #"SimpleBot_v2",
         # "UCLA_MCTS_0.1",
         # "UCLA_MCTS_0.5",
-        "UCLA_MCTS_0.2",
+        #"UCLA_MCTS_0.2",
         # "ARM_bot",
         "fill_bot"
 
@@ -294,6 +294,11 @@ def main():
     with open(log_path, "a") as f_log:
         for res in results:
             a1_name, a2_name, a1_wins, a2_wins, draws, game_records, a1_moves, a1_time, a2_moves, a2_time = res
+            
+            # Actually write the game records to the JSON lines file
+            for record in game_records:
+                f_log.write(json.dumps(record) + "\n")
+                
             idx1 = name_to_idx[a1_name]
             idx2 = name_to_idx[a2_name]
             
