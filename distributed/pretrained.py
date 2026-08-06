@@ -44,7 +44,7 @@ from model import NNetWrapper, dotdict
 PRETRAIN_ARGS = dotdict({
     'lr':                 1e-3,        # AdamW LR (higher than AZ training LR)
     'epochs':             3,          # 10-20 epochs recommended
-    'batch_size':         1024,         # 256-512 recommended
+    'batch_size':         4096,         # 256-512 recommended
     'num_channels':       256,
     'num_res_blocks':     10,
     'l2_reg':             1e-4,        # Weight decay
@@ -107,19 +107,40 @@ def game_record_to_examples(record: dict, game_size: int = 5):
     if not moves or len(moves) != len(policies):
         return []
 
-    game = DotsAndBoxesGame(size=game_size)
+    # First pass: deduce starting_player
+    # Since odd-sized boards never end in a draw, we can determine who started
+    # by simulating the game with Player 1 starting and checking if the result matches the winner.
+    test_game = DotsAndBoxesGame(size=game_size, starting_player=1)
+    for move in moves:
+        if move in test_game.get_valid_moves():
+            test_game.execute_move(move)
+        else:
+            break
+            
+    if test_game.result == winner:
+        correct_starting_player = 1
+    elif test_game.result == -winner:
+        correct_starting_player = -1
+    else:
+        # Fallback (e.g. for even-sized boards with draws)
+        correct_starting_player = 1
+
+    # Second pass: extract examples
+    game = DotsAndBoxesGame(size=game_size, starting_player=correct_starting_player)
     examples = []
 
-    for move, policy in zip(moves, policies):
+    for idx, (move, policy) in enumerate(zip(moves, policies)):
         # Encode current board state BEFORE executing the move
-        board_state = encode_board(game)
-        pi = np.array(policy, dtype=np.float32)
+        # Only record examples for UCLABot_v6 (Player 1) and skip the first 4 random moves
+        if idx >= 4 and game.current_player == 1:
+            board_state = encode_board(game)
+            pi = np.array(policy, dtype=np.float32)
 
-        # Value: final result from the perspective of the CURRENT player
-        # game.current_player is +1 or -1
-        value = float(winner) * game.current_player
+            # Value: final result from the perspective of the CURRENT player
+            # game.current_player is +1 or -1
+            value = float(winner) * game.current_player
 
-        examples.append((board_state, pi, value))
+            examples.append((board_state, pi, value))
 
         # Execute the move to advance game state
         if move in game.get_valid_moves():
@@ -213,7 +234,7 @@ def load_examples_from_jsonl(filepath: str, game_size: int = 5):
 # ─────────────────────────────────────────────────────────────────────────────
 # Supervised training loop
 # ─────────────────────────────────────────────────────────────────────────────
-def pretrain(nnet: NNetWrapper, dataset: Dataset, args=PRETRAIN_ARGS, writer=None, start_step=0):
+def pretrain(nnet: NNetWrapper, dataset: GameDataset, args: dotdict, writer=None, start_step=0, run_dir=None):
     """
     Run supervised pretraining on the provided dataset using DataLoader.
 
@@ -223,6 +244,7 @@ def pretrain(nnet: NNetWrapper, dataset: Dataset, args=PRETRAIN_ARGS, writer=Non
         args:       pretrain hyperparameters
         writer:     optional TensorBoard SummaryWriter
         start_step: global step offset for TensorBoard
+        run_dir:    directory to save per-epoch checkpoints
 
     Returns:
         Final (pi_loss, v_loss, total_loss) averages over the last epoch
@@ -296,6 +318,11 @@ def pretrain(nnet: NNetWrapper, dataset: Dataset, args=PRETRAIN_ARGS, writer=Non
 
         scheduler.step()
 
+        if run_dir:
+            epoch_path = os.path.join(run_dir, f"pretrain_epoch_{epoch + 1}.pth.tar")
+            torch.save({'state_dict': nnet.nnet.state_dict()}, epoch_path)
+            print(f"  [Pretrain] Saved model checkpoint for epoch {epoch + 1} at {epoch_path}")
+
         last_pi, last_v, last_total = avg_pi, avg_v, avg_total
 
     return last_pi, last_v, last_total
@@ -344,7 +371,7 @@ def run_pretraining(nnet: NNetWrapper, run_dir: str, writer=None, game_size: int
     # ── Collect data from all available log files ──────────────────────────
     all_examples = []
 
-    bot_log = os.path.join(PROJECT_ROOT, "game_logs.jsonl")
+    bot_log = os.path.join(PROJECT_ROOT, "game_logs_bot.jsonl")
 
     for logfile in [bot_log]:
         exs = load_examples_from_jsonl(logfile, game_size)
@@ -365,7 +392,7 @@ def run_pretraining(nnet: NNetWrapper, run_dir: str, writer=None, game_size: int
     # ── Train ──────────────────────────────────────────────────────────────
     print(f"\n[Pretrain] Starting supervised pretraining on {len(dataset):,} examples "
           f"for {PRETRAIN_ARGS.epochs} epochs...")
-    pi_loss, v_loss, total_loss = pretrain(nnet, dataset, PRETRAIN_ARGS, writer)
+    pi_loss, v_loss, total_loss = pretrain(nnet, dataset, PRETRAIN_ARGS, writer, run_dir=run_dir)
     print(f"[Pretrain] Done. Final losses — pi: {pi_loss:.4f} | v: {v_loss:.4f} | total: {total_loss:.4f}")
 
     # ── Save to all checkpoint locations so every component starts from pretrained weights ──

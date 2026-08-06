@@ -99,9 +99,10 @@ PHASES_CONFIG = [
     [("greedy_chain", 0.2), ("simple_bot", 0.4), ("self", 0.4)],
     [("simple_bot", 0.2), ("simple_bot_v2", 0.4), ("self", 0.4)],
     [("simple_bot_v2", 0.2), ("ucla_bot_v3", 0.4), ("self", 0.4)],
+    [("ucla_bot_v3", 0.6), ("self", 0.4)],
     [("ucla_bot_v3", 0.3), ("self", 0.5), ("best", 0.1), ("past", 0.1)],  # Fixed sum = 1.0 & added comma
     [("ucla_bot_v3", 0.1), ("self", 0.7), ("best", 0.1), ("past", 0.1)],  # Fixed sum = 1.0
-    [("self", 0.8), ("best", 0.1), ("past", 0.1)]                        # Final phase: 0% external bot
+    # [("self", 0.8), ("best", 0.1), ("past", 0.1)]                        # Final phase: 0% external bot
 ]
 
 PHASE_ADVANCE_THRESHOLD = {

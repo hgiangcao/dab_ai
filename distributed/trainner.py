@@ -63,7 +63,14 @@ def save_training_checkpoint():
     """Save training states. (Currently handled by model_manager.save_latest_model)"""
     pass
 
-def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=None):
+# ─────────────────────────────────────────────────────────────────────────────
+# Pretrained anchor buffer constants
+# ─────────────────────────────────────────────────────────────────────────────
+PRETRAIN_SAMPLE_INIT  = 100_000   # examples sampled from expert buffer at iteration 0
+PRETRAIN_SAMPLE_DECAY =  10_000   # sample size decreases by this each iteration
+
+def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=None,
+                           pretrained_buffer=None, pretrained_sample_size=0):
     """
     Execute one complete iteration:
     1. Validate and promote incoming → ready
@@ -180,9 +187,6 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
                 print(f"===========================================================\n")
                 model_manager.advance_curriculum_phase()
                 phase_advanced = True
-                if replay_buffer is not None:
-                    replay_buffer.clear()
-                    print("Replay buffer flushed upon curriculum phase advance.")
         
     # 3. Load the replay buffer from training/
     new_data = replay_manager.load_replay_buffer(claimed_files)
@@ -225,9 +229,30 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     # 4. Train candidate network
     merged_path = replay_manager.merge_replay(claimed_files)
     candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
-    dynamic_epochs = 2 * len(claimed_files)
-    print(f"Epochs this iteration: {dynamic_epochs}  ({len(claimed_files)} new files × 2)")
-    losses = train_network(replay_data, candidate_path, nnet, epochs=dynamic_epochs)
+    dynamic_epochs =  len(claimed_files)
+    print(f"Epochs this iteration: {dynamic_epochs}  ({len(claimed_files)} new files)")
+
+    # ── Mix in pretrained anchor (decaying sample size, full buffer kept) ───
+    # The pretrained_buffer is NEVER modified — only the number we randomly
+    # sample from it decreases by PRETRAIN_SAMPLE_DECAY each iteration.
+    import random as _rnd2
+    if pretrained_buffer and pretrained_sample_size > 0:
+        n_sample = min(pretrained_sample_size, len(pretrained_buffer))
+        pretrain_sample = _rnd2.sample(pretrained_buffer, n_sample)
+        combined_data = replay_data + pretrain_sample
+        _rnd2.shuffle(combined_data)
+        print(f"[Anchor] Sampled {n_sample:,} expert examples (buffer={len(pretrained_buffer):,}, "
+              f"next size will be {max(0, pretrained_sample_size - PRETRAIN_SAMPLE_DECAY):,}) "
+              f"→ total {len(combined_data):,} training samples")
+        if writer:
+            writer.add_scalar('Pretrained/Sample_Size',  n_sample,                 iteration)
+            writer.add_scalar('Pretrained/Buffer_Total', len(pretrained_buffer),   iteration)
+    else:
+        combined_data = replay_data
+        if pretrained_buffer is not None:
+            print("[Anchor] Pretrained anchor exhausted — training on RL self-play only.")
+
+    losses = train_network(combined_data, candidate_path, nnet, epochs=dynamic_epochs)
     
     print(f"DEBUG LOGS BEFORE WRITER: policy_loss = {losses['pi_loss']}, policy_entropy = {losses['entropy']}")
     if writer:
@@ -253,6 +278,9 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     
     if promoted_model:
         print("Model promoted! Cleaning up old data...")
+        # if replay_buffer is not None:
+        #     replay_buffer.clear()
+        #     print("Replay buffer flushed upon model promotion.")
         # Invalidate the persistent self-play executor so workers reload
         # the newly promoted model on the next self-play batch. Without
         # this, workers keep using the pre-promotion weights indefinitely.
@@ -388,18 +416,46 @@ def training_loop(load_checkpoint=None):
     # Initialize rolling experience replay buffer capped at MAX_REPLAY_SIZE
     print(f"Initializing experience replay buffer (max size: {config.MAX_REPLAY_SIZE:,})...")
     replay_buffer = deque(maxlen=config.MAX_REPLAY_SIZE)
-    
+
+    # ── Pretrained anchor buffer ────────────────────────────────────────────
+    # Keeps ALL expert examples.  Each iteration we randomly sample a
+    # SHRINKING number of them (100k → 90k → ... → 0 after 10 iterations)
+    # so the supervised signal fades gracefully as RL data ramps up.
+    pretrained_buffer   = []
+    pretrained_sample_size = PRETRAIN_SAMPLE_INIT
+    bot_log = os.path.join(PROJECT_ROOT, "game_logs_bot.jsonl")
+    if os.path.exists(bot_log):
+        try:
+            from pretrained import load_examples_from_jsonl
+            print(f"[Anchor] Loading ALL expert examples from {bot_log} ...")
+            pretrained_buffer = load_examples_from_jsonl(bot_log, game_size=5)
+            print(f"[Anchor] Pretrained buffer loaded: {len(pretrained_buffer):,} total expert examples.")
+            print(f"[Anchor] Will sample {pretrained_sample_size:,} per iteration, "
+                  f"decaying by {PRETRAIN_SAMPLE_DECAY:,} each time "
+                  f"(exhausted after {PRETRAIN_SAMPLE_INIT // PRETRAIN_SAMPLE_DECAY} iterations).")
+        except Exception as _e:
+            print(f"[Anchor] WARNING: Could not load expert examples: {_e}. Disabled.")
+            pretrained_buffer = []
+    else:
+        print(f"[Anchor] {bot_log} not found — pretrained anchor buffer disabled.")
+
     print("PHASE 1: ALPHA ZERO TRAINING")
 
     while True:
         try:
             # Check how many replay files are in incoming/ and ready/
-            success = run_training_iteration(writer, iteration, global_nnet, replay_buffer)
+            success = run_training_iteration(
+                writer, iteration, global_nnet, replay_buffer,
+                pretrained_buffer=pretrained_buffer,
+                pretrained_sample_size=pretrained_sample_size,
+            )
             if not success:
                 print("Iteration skipped. Sleeping 60s...")
                 time.sleep(60)
             else:
                 iteration += 1
+                # Decay the sample size for next iteration (clamp at 0)
+                pretrained_sample_size = max(0, pretrained_sample_size - PRETRAIN_SAMPLE_DECAY)
                 
         except Exception as e:
             print(f"Error during training iteration: {e}")
