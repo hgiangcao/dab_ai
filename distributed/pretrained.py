@@ -36,6 +36,7 @@ import config
 import model_manager
 from game import DotsAndBoxesGame
 from model import NNetWrapper, dotdict
+from dataset import DotsAndBoxesDataset
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,14 +134,15 @@ def game_record_to_examples(record: dict, game_size: int = 5):
         # Encode current board state BEFORE executing the move
         # Only record examples for UCLABot_v6 (Player 1) and skip the first 4 random moves
         if idx >= 4 and game.current_player == 1:
-            board_state = encode_board(game)
+            canonical_lines = game.get_canonical_lines()
+            canonical_boxes = game.get_canonical_boxes()
             pi = np.array(policy, dtype=np.float32)
 
             # Value: final result from the perspective of the CURRENT player
             # game.current_player is +1 or -1
             value = float(winner) * game.current_player
 
-            examples.append((board_state, pi, value))
+            examples.append((canonical_lines, canonical_boxes, pi, value))
 
         # Execute the move to advance game state
         if move in game.get_valid_moves():
@@ -151,60 +153,7 @@ def game_record_to_examples(record: dict, game_size: int = 5):
     return examples
 
 
-class GameDataset(Dataset):
-    """
-    PyTorch Dataset for game examples that applies 8-fold symmetry augmentation on the fly.
-    """
-    def __init__(self, examples):
-        self.examples = examples
 
-    def __len__(self):
-        # We apply 8-fold augmentation, so the dataset is 8x the size
-        return len(self.examples) * 8
-
-    def __getitem__(self, idx):
-        example_idx = idx // 8
-        aug_idx = idx % 8
-        board_state, pi, value = self.examples[example_idx]
-
-        # board_state shape: (4, size+1, size+1)
-        size = board_state.shape[1] - 1
-
-        # Reconstruct lines array from h/v channels
-        h_ch  = board_state[0, :size + 1, :size]
-        v_ch  = board_state[1, :size, :size + 1]
-        lines = DotsAndBoxesGame.h_v_to_l(h_ch, v_ch)
-
-        boxes_p1 = board_state[2, :size, :size]
-        boxes_m1 = board_state[3, :size, :size]
-        boxes = boxes_p1.astype(float) - boxes_m1.astype(float)
-
-        pi_lines = pi
-
-        # Apply augmentation for this specific aug_idx
-        aug_lines = DotsAndBoxesGame.get_rotations_and_reflections_lines(lines)[aug_idx]
-        aug_boxes = DotsAndBoxesGame.get_rotations_and_reflections_boxes(boxes)[aug_idx]
-        aug_pi = DotsAndBoxesGame.get_rotations_and_reflections_lines(pi_lines)[aug_idx]
-
-        h, v_mat = DotsAndBoxesGame.l_to_h_v(aug_lines)
-
-        c1 = np.zeros((size + 1, size + 1))
-        c1[:size + 1, :size] = h
-
-        c2 = np.zeros((size + 1, size + 1))
-        c2[:size, :size + 1] = v_mat
-
-        c3 = np.zeros((size + 1, size + 1))
-        c3[:size, :size] = (aug_boxes == 1).astype(float)
-
-        c4 = np.zeros((size + 1, size + 1))
-        c4[:size, :size] = (aug_boxes == -1).astype(float)
-
-        aug_board = np.stack([c1, c2, c3, c4])
-
-        return torch.FloatTensor(aug_board.astype(np.float32)), \
-               torch.FloatTensor(aug_pi.astype(np.float32)), \
-               torch.tensor(value, dtype=torch.float32)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -234,13 +183,13 @@ def load_examples_from_jsonl(filepath: str, game_size: int = 5):
 # ─────────────────────────────────────────────────────────────────────────────
 # Supervised training loop
 # ─────────────────────────────────────────────────────────────────────────────
-def pretrain(nnet: NNetWrapper, dataset: GameDataset, args: dotdict, writer=None, start_step=0, run_dir=None):
+def pretrain(nnet: NNetWrapper, dataset: DotsAndBoxesDataset, args: dotdict, writer=None, start_step=0, run_dir=None):
     """
     Run supervised pretraining on the provided dataset using DataLoader.
 
     Args:
         nnet:       NNetWrapper instance (will be trained in-place)
-        dataset:    GameDataset instance
+        dataset:    DotsAndBoxesDataset instance
         args:       pretrain hyperparameters
         writer:     optional TensorBoard SummaryWriter
         start_step: global step offset for TensorBoard
@@ -386,8 +335,8 @@ def run_pretraining(nnet: NNetWrapper, run_dir: str, writer=None, game_size: int
     print(f"[Pretrain] Total raw examples: {len(all_examples):,}")
 
     # ── Augment ────────────────────────────────────────────────────────────
-    dataset = GameDataset(all_examples)
-    print(f"[Pretrain] Initialized GameDataset with {len(dataset):,} augmented examples (8-fold symmetry)")
+    dataset = DotsAndBoxesDataset(all_examples)
+    print(f"[Pretrain] Initialized DotsAndBoxesDataset with {len(dataset):,} augmented examples (8-fold symmetry)")
 
     # ── Train ──────────────────────────────────────────────────────────────
     print(f"\n[Pretrain] Starting supervised pretraining on {len(dataset):,} examples "

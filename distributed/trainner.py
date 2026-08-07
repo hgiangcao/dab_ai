@@ -66,8 +66,8 @@ def save_training_checkpoint():
 # ─────────────────────────────────────────────────────────────────────────────
 # Pretrained anchor buffer constants
 # ─────────────────────────────────────────────────────────────────────────────
-PRETRAIN_SAMPLE_INIT  = 100_000   # examples sampled from expert buffer at iteration 0
-PRETRAIN_SAMPLE_DECAY =  10_000   # sample size decreases by this each iteration
+PRETRAIN_SAMPLE_INIT  = 20_000   # examples sampled from expert buffer at iteration 0
+PRETRAIN_SAMPLE_DECAY =  200   # sample size decreases by this each iteration
 
 def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=None,
                            pretrained_buffer=None, pretrained_sample_size=0):
