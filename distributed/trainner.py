@@ -97,7 +97,6 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     # 2.5 Check Curriculum Phase Winrates
     client_winrates = []
     current_server_phase = model_manager.get_current_phase()
-    phase_iterations = model_manager.get_phase_iteration()
     phase_advanced = False
     
     import json
@@ -275,9 +274,6 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     # 6. Mark files as used
     replay_manager.mark_used(claimed_files)
     
-    # Increment phase iteration if we didn't advance the phase this round
-    if not phase_advanced:
-        model_manager.increment_phase_iteration()
     
     # 7. Maintain disk space
     replay_manager.cleanup_old(days=7)

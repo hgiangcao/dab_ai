@@ -66,21 +66,10 @@ def get_current_phase() -> int:
     return _read_version_field("current_phase", 0)
 
 
-def get_phase_iteration() -> int:
-    return _read_version_field("phase_iteration", 0)
-
-
-def increment_phase_iteration() -> int:
-    new_val = get_phase_iteration() + 1
-    _write_version_field("phase_iteration", new_val)
-    return new_val
-
-
 def advance_curriculum_phase() -> int:
     current = get_current_phase()
     new_phase = min(len(config.PHASES_CONFIG) - 1, current + 1)
     _write_version_field("current_phase", new_phase)
-    _write_version_field("phase_iteration", 0)
     return new_phase
 
 

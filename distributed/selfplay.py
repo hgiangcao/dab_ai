@@ -59,8 +59,8 @@ class SelfPlayGenerator:
         """Loads the path to the latest model to be used by the multiprocessing workers."""
         self.latest_model_path = os.path.abspath(checkpoint)
  
-    def play_games(self, num_games, save_dir, worker_id="worker", model_version=0, current_phase=0,epoch =0):
-        print(f"epoch {epoch} - Starting generation of {num_games} games at Phase {current_phase}...")
+    def play_games(self, num_games, save_dir, worker_id="worker", model_version=0, current_phase=0):
+        print(f"version {model_version} - Starting generation of {num_games} games at Phase {current_phase}...")
  
         # Determine opponent pool for current phase explicitly
         current_pool = list(config.PHASES_CONFIG[current_phase])
@@ -68,11 +68,7 @@ class SelfPlayGenerator:
         total_prob = sum(p for _, p in current_pool)
         normalized_probs = [p / total_prob for _, p in current_pool]
         
-        # Reverse Curriculum Fill % approximation based on model version (iterations)
-        start_fill_pct = max(0.0, 0.70 - (0.70 / 10) * epoch)
-        
-        print(start_fill_pct,"RANDOM FILLED MOVES")
-        
+
         # 3. Setup episode specs for chunked multiprocessing
         episode_specs = []
         for _ in range(num_games):
@@ -83,7 +79,6 @@ class SelfPlayGenerator:
                 opp_type = "self"
                 
             episode_specs.append((
-                start_fill_pct,
                 opp_type,
                 None # opp_path is None because we don't have past checkpoints locally
             ))

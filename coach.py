@@ -115,13 +115,13 @@ def build_worker_chunks(
 
 def worker_execute_episode(worker_args):
     """Compatibility wrapper for code that still submits one episode per task."""
-    game_size, latest_model_path, mcts_class, args, start_fill_pct, opp_type, opp_path = worker_args
+    game_size, latest_model_path, mcts_class, args, opp_type, opp_path = worker_args
     results = worker_execute_episode_chunk((
         game_size,
         latest_model_path,
         mcts_class,
         args,
-        [(start_fill_pct, opp_type, opp_path)],
+        [(opp_type, opp_path)],
     ))
     return results[0]
 
@@ -260,7 +260,7 @@ def worker_execute_episode_chunk(worker_args):
         opponent_cache[key] = agent_opp
         return agent_opp
 
-    def run_episode(start_fill_pct, opp_type, opp_path):
+    def run_episode(opp_type, opp_path):
         if opp_type in ["best", "past"] and opp_path is None:
             opp_type = "self"
 
@@ -280,21 +280,6 @@ def worker_execute_episode_chunk(worker_args):
         mcts_latest.reset_tree()
         last_action_for_mcts = None  # tracks last move played so tree can be advanced
 
-        # Reverse Curriculum: Pre-fill the board via a FillBot vs FillBot game
-        # up to start_fill_pct of total lines, producing a naturally reachable state.
-        if start_fill_pct >= 0.001:
-            from bots.fill_bot import FillBot
-            fill_bot_a = FillBot()
-            fill_bot_b = FillBot()
-            target_lines = int(game.N_LINES * start_fill_pct)
-            while int(np.count_nonzero(game.l)) < target_lines and game.is_running():
-                bot = fill_bot_a if game.current_player == 1 else fill_bot_b
-                move = bot.get_move(game)
-                if move is None:
-                    break
-                game.execute_move(move)
-            # Pre-fill moves are not from MCTS — start fresh from this position
-            last_action_for_mcts = None
 
         episode_step = 0
         depths = []
@@ -495,15 +480,8 @@ class AlphaZeroTrainer:
         # Force 'spawn' context to safely use CUDA in worker processes
         mp_context = multiprocessing.get_context('spawn')
         
-        # Reverse Curriculum Setup
-        start_fill_pct = 0.70
-        decay_iterations = 1
-        decay_step = 0.70 / decay_iterations if decay_iterations > 0 else 0
-        
         for i in range(starting_iteration, self.args.num_iters + 1):
             print(f"\n#################### Iteration {i}/{self.args.num_iters} ####################")
-            
-            self.writer.add_scalar("Log/Start_Sequence_Fill", start_fill_pct, i)
             
             import glob
             # Save latest model to temp file for workers to avoid 136MB IPC transfer
@@ -535,12 +513,11 @@ class AlphaZeroTrainer:
                     opp_path = random.choice(past_checkpoints) if past_checkpoints else None
                     
                 episode_specs.append((
-                    start_fill_pct,
                     opp_type,
                     opp_path
                 ))
             
-            print(f"------------ Self-Play (Fill: {start_fill_pct*100:.1f}%) ------------")
+            print(f"------------ Self-Play ------------")
             iteration_data = []
             episode_lengths = []
             episode_depths = []
@@ -631,9 +608,6 @@ class AlphaZeroTrainer:
                     if res == 1: pwins += 1
                     elif res == -1: plosses += 1
                     else: pdraws += 1
-            
-            # Decay Curriculum
-            start_fill_pct = max(0.0, start_fill_pct - decay_step)
             
             print(f"\nIteration {i} complete. Vs PNet -> Wins: {pwins} | Losses: {plosses} | Draws: {pdraws}")
             
