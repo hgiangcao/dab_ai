@@ -45,11 +45,11 @@ MAX_REPLAY_SIZE = 20000
 MIN_REPLAY_SIZE = 2000
 
 # Evaluation defaults
-EVAL_GAMES_VS_BOTS    = 10   # games vs each external bot during screening
+EVAL_GAMES_VS_BOTS    = 20   # games vs each external bot during screening
 EVAL_GAMES_VS_CURRENT = 50   # games vs current/self checkpoint during screening
 
 # Promotion: BOTH conditions must pass
-MIN_BOT_WINRATE_FOR_PROMOTION = 0.80   # min(bot_winrates) threshold
+PROMOTION_BOT_SCORE_RATIO = 0.80       # candidate_overall_bot_score >= this * best_overall_bot_score
 MIN_WINRATE_VS_CURRENT        = 0.55   # winrate vs current checkpoint threshold
 
 # Best-model update: candidate qualifies when its overall bot score is at least
