@@ -67,7 +67,7 @@ def save_training_checkpoint():
 # Pretrained anchor buffer constants
 # ─────────────────────────────────────────────────────────────────────────────
 PRETRAIN_SAMPLE_INIT  = 20_000   # examples sampled from expert buffer at iteration 0
-PRETRAIN_SAMPLE_DECAY =  200   # sample size decreases by this each iteration
+PRETRAIN_SAMPLE_DECAY =  250   # sample size decreases by this each iteration
 
 def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=None,
                            pretrained_buffer=None, pretrained_sample_size=0):
@@ -91,35 +91,8 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
     # 2. Claim files atomically to prevent race conditions
     claimed_files = replay_manager.claim_for_training()
     if not claimed_files:
-        print("No files in ready/ to claim. Trainer acting as fallback worker to generate 50 games...")
-        from selfplay import SelfPlayGenerator
-        import shutil
-        
-        generator = SelfPlayGenerator()
-        candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
-        if not os.path.exists(candidate_path):
-            candidate_path = model_manager.get_best_model_path()
-            
-        if os.path.exists(candidate_path):
-            generator.load_model(candidate_path)
-            
-        replay_file = generator.play_games(
-            num_games=50,
-            save_dir=config.REPLAY_READY,
-            worker_id="trainer_fallback",
-            model_version=iteration,
-            current_phase=model_manager.get_current_phase(),
-            epoch=model_manager.get_phase_iteration()
-        )
-        if replay_file and os.path.exists(replay_file):
-            print(f"Trainer fallback generated {replay_file}.")
-            fname = os.path.basename(replay_file)
-            dest = os.path.join(config.REPLAY_TRAINING, fname)
-            shutil.move(replay_file, dest)
-            claimed_files.append(dest)
-        else:
-            print("Trainer fallback failed to generate games.")
-            return False
+        print("No replay data available from workers. Waiting for next batch...")
+        return False
         
     # 2.5 Check Curriculum Phase Winrates
     client_winrates = []
@@ -175,19 +148,16 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
         # Advance phase only when the model is genuinely winning, 
         # with a backstop of 20 iterations so training never stalls forever.
         threshold = config.PHASE_ADVANCE_THRESHOLD.get(current_phase, 0.60)
-        
-        # Only check activate next phase after this 10 filled game epoch 
-        # (actual winrate when the game starting from scratch)
-        if phase_iterations >= 10:
-            if (max_client_winrate >= threshold ) and current_phase < len(config.PHASES_CONFIG) - 1:
-                reason = f"Winrate {max_client_winrate:.1%} >= {threshold:.0%}" if max_client_winrate >= threshold else "Max phase iterations reached"
-                print(f"\n===========================================================")
-                print(f"Phase {current_phase} cleared ({reason})!")
-                print(f"Advancing to Phase {current_phase + 1}...")
-                print(f"===========================================================\n")
-                model_manager.advance_curriculum_phase()
-                phase_advanced = True
-        
+
+        if (max_client_winrate >= threshold) and current_phase < len(config.PHASES_CONFIG) - 1:
+            reason = f"Winrate {max_client_winrate:.1%} >= {threshold:.0%}"
+            print(f"\n===========================================================")
+            print(f"Phase {current_phase} cleared ({reason})!")
+            print(f"Advancing to Phase {current_phase + 1}...")
+            print(f"===========================================================\n")
+            model_manager.advance_curriculum_phase()
+            phase_advanced = True
+
     # 3. Load the replay buffer from training/
     new_data = replay_manager.load_replay_buffer(claimed_files)
     
@@ -264,26 +234,30 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
         writer.add_scalar('Log/Memory_Size', len(replay_data), iteration)
         writer.add_scalar('Log/Learning_Rate', current_lr, iteration)
     
-    # 5. Evaluate and update
-    print("\nEvaluating candidate model against best model and baselines...")
-    promoted_model, win_rate, baseline_win_rates, avg_depth = evaluator.evaluate_new_model(iteration)
-    
+    # 5. Evaluate candidate and apply promotion / best-update logic
+    print("\nEvaluating candidate model...")
+    promoted, updated_best, bot_win_rates, winrate_vs_current, avg_depth = \
+        evaluator.evaluate_new_model(iteration)
+
     if writer:
-        if win_rate is not None:
-            writer.add_scalar('Evaluation/Win_Rate_Vs_Old', win_rate, iteration)
-            writer.add_scalar('Evaluation/MCTS_Avg_Depth', avg_depth, iteration)
-        for opp_name, rate in baseline_win_rates.items():
-            writer.add_scalar(f'Evaluation/Win_Rate_Vs_{opp_name}', rate, iteration)
+        if winrate_vs_current is not None:
+            writer.add_scalar('Evaluation/WinRate_Vs_Current', winrate_vs_current, iteration)
+            writer.add_scalar('Evaluation/MCTS_Avg_Depth',     avg_depth,           iteration)
+        for bot_name, wr in bot_win_rates.items():
+            writer.add_scalar(f'Evaluation/WinRate_Vs_{bot_name}', wr, iteration)
+        if bot_win_rates:
+            min_wr     = min(bot_win_rates.values())
+            overall_wr = sum(bot_win_rates.values()) / len(bot_win_rates)
+            writer.add_scalar('Evaluation/Min_Bot_WinRate',     min_wr,     iteration)
+            writer.add_scalar('Evaluation/Overall_Bot_Score',   overall_wr, iteration)
+        writer.add_scalar('Evaluation/Promoted',     int(promoted),     iteration)
+        writer.add_scalar('Evaluation/Updated_Best', int(updated_best), iteration)
         writer.flush()
     
-    if promoted_model:
-        print("Model promoted! Cleaning up old data...")
-        # if replay_buffer is not None:
-        #     replay_buffer.clear()
-        #     print("Replay buffer flushed upon model promotion.")
+    if promoted:
+        print("Candidate promoted to current/self.")
         # Invalidate the persistent self-play executor so workers reload
-        # the newly promoted model on the next self-play batch. Without
-        # this, workers keep using the pre-promotion weights indefinitely.
+        # the newly promoted model on their next batch.
         try:
             import coach as _coach
             if _coach._SELFPLAY_EXECUTOR is not None:
@@ -294,6 +268,9 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
                 _coach._SELFPLAY_EXECUTOR_MAX_WORKERS = None
         except Exception as _e:
             print(f"Warning: could not reset self-play executor: {_e}")
+
+    if updated_best:
+        print("best.pth.tar updated to current candidate.")
 
     # 6. Mark files as used
     replay_manager.mark_used(claimed_files)

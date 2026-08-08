@@ -45,6 +45,18 @@ MAX_REPLAY_SIZE = 20000
 MIN_REPLAY_SIZE = 2000
 
 # Evaluation defaults
+EVAL_GAMES_VS_BOTS    = 10   # games vs each external bot during screening
+EVAL_GAMES_VS_CURRENT = 50   # games vs current/self checkpoint during screening
+
+# Promotion: BOTH conditions must pass
+MIN_BOT_WINRATE_FOR_PROMOTION = 0.80   # min(bot_winrates) threshold
+MIN_WINRATE_VS_CURRENT        = 0.55   # winrate vs current checkpoint threshold
+
+# Best-model update: candidate qualifies when its overall bot score is at least
+# this fraction of the stored best score
+BEST_UPDATE_SCORE_RATIO = 0.90
+
+# Legacy (kept for evaluator backward compat, no longer used for promotion)
 EVAL_GAMES = 50
 PROMOTION_THRESHOLD = 0.55
 
@@ -91,28 +103,43 @@ BEST_MODEL_DOWNLOAD_URL = "/best_model"
 VERSION_API = "/version"
 UPLOAD_REPLAY_API = "/upload_replay"
 
-# Curriculum phases configuration
+# Curriculum phases configuration — gradual accumulation per spec
 PHASES_CONFIG = [
-    [("random", 0.8), ("self", 0.2)],
-    [("random", 0.2), ("greedy", 0.6), ("self", 0.2)],
-    [("greedy", 0.2), ("greedy_chain", 0.4), ("self", 0.4)],
-    [("greedy_chain", 0.2), ("simple_bot", 0.4), ("self", 0.4)],
-    [("simple_bot", 0.2), ("simple_bot_v2", 0.4), ("self", 0.4)],
-    [("simple_bot_v2", 0.2), ("ucla_bot_v3", 0.4), ("self", 0.4)],
-    [("ucla_bot_v3", 0.6), ("self", 0.4)],
-    [("ucla_bot_v3", 0.3), ("self", 0.5), ("best", 0.1), ("past", 0.1)],  # Fixed sum = 1.0 & added comma
-    [("ucla_bot_v3", 0.1), ("self", 0.7), ("best", 0.1), ("past", 0.1)],  # Fixed sum = 1.0
-    # [("self", 0.8), ("best", 0.1), ("past", 0.1)]                        # Final phase: 0% external bot
+    # Phase 0: establish basic strategy
+    [("greedy", 0.80), ("self", 0.20)],
+
+    # Phase 1: introduce stronger bot
+    [("greedy", 0.50), ("simple_bot_v2", 0.30), ("self", 0.20)],
+
+    # Phase 2: increase simple_bot_v2
+    [("greedy", 0.30), ("simple_bot_v2", 0.40), ("ucla_bot_v3", 0.10), ("self", 0.20)],
+
+    # Phase 3: introduce strong UCLA bot
+    [("greedy", 0.20), ("simple_bot_v2", 0.30), ("ucla_bot_v3", 0.30), ("self", 0.20)],
+
+    # Phase 4: UCLA becomes dominant
+    [("greedy", 0.10), ("simple_bot_v2", 0.25), ("ucla_bot_v3", 0.40), ("self", 0.25)],
+
+    # Phase 5: strong RL
+    [("greedy", 0.10), ("simple_bot_v2", 0.20), ("ucla_bot_v3", 0.35),
+     ("self", 0.25), ("best", 0.10)],
+
+    # Phase 6: late RL
+    [("greedy", 0.05), ("simple_bot_v2", 0.15), ("ucla_bot_v3", 0.30),
+     ("self", 0.30), ("best", 0.10), ("past", 0.10)],
+
+    # Phase 7: steady-state
+    [("greedy", 0.05), ("simple_bot_v2", 0.10), ("ucla_bot_v3", 0.25),
+     ("self", 0.40), ("best", 0.10), ("past", 0.10)],
 ]
 
 PHASE_ADVANCE_THRESHOLD = {
-    0: 0.80,
-    1: 0.75,
-    2: 0.70,
-    3: 0.70,
-    4: 0.70,
-    5: 0.70,
-    6: 0.70,
-    7: 0.70,
-    8: 0.70
+    0: 0.80,  # greedy
+    1: 0.75,  # greedy + simple_bot_v2
+    2: 0.75,  # introduce UCLA
+    3: 0.80,
+    4: 0.85,
+    5: 0.85,
+    6: 0.85,
+    7: 0.85,
 }

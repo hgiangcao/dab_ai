@@ -1,199 +1,242 @@
 import os
 import shutil
+import glob
 import torch
 import config
 
-def get_current_version():
-    """
-    Read version.txt
 
-    Return:
+# ─────────────────────────────────────────────────────────────────────────────
+# version.txt helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
-    15 (integer of last_updated_model)
-    """
+def _read_version_field(field: str, default):
+    """Read a single named field from version.txt."""
     if os.path.exists(config.VERSION_FILE):
         with open(config.VERSION_FILE, "r") as f:
             for line in f:
-                if line.startswith("last_updated_model:"):
+                if line.startswith(f"{field}:"):
+                    val = line.split(":", 1)[1].strip()
                     try:
-                        return int(line.split(":")[1].strip())
-                    except ValueError:
-                        break
-    return 0
+                        return type(default)(val)
+                    except (ValueError, TypeError):
+                        return default
+    return default
 
-def increase_version():
-    """
-    Increase model version.
 
-    Before:
-    last_updated_model: 15
-
-    After:
-    last_updated_model: 16
-    """
-    version = get_current_version()
-    new_version = version + 1
-    
+def _write_version_field(field: str, value):
+    """Write/update a single named field in version.txt."""
+    lines = []
+    found = False
     if os.path.exists(config.VERSION_FILE):
         with open(config.VERSION_FILE, "r") as f:
             lines = f.readlines()
-            
-        with open(config.VERSION_FILE, "w") as f:
-            for line in lines:
-                if line.startswith("last_updated_model:"):
-                    f.write(f"last_updated_model: {new_version}\n")
-                else:
-                    f.write(line)
+        new_lines = []
+        for line in lines:
+            if line.startswith(f"{field}:"):
+                new_lines.append(f"{field}: {value}\n")
+                found = True
+            else:
+                new_lines.append(line)
+        lines = new_lines
+    if not found:
+        lines.append(f"{field}: {value}\n")
+    with open(config.VERSION_FILE, "w") as f:
+        f.writelines(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Version / phase state
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_current_version() -> int:
+    return _read_version_field("last_updated_model", 0)
+
+
+def increase_version() -> int:
+    new_version = get_current_version() + 1
+    _write_version_field("last_updated_model", new_version)
     return new_version
 
+
 def set_pretrain_finished():
-    """
-    Update version.txt to indicate that pretraining is finished.
-    """
-    if os.path.exists(config.VERSION_FILE):
-        with open(config.VERSION_FILE, "r") as f:
-            lines = f.readlines()
-            
-        with open(config.VERSION_FILE, "w") as f:
-            for line in lines:
-                if line.startswith("finish_pretrain:"):
-                    f.write("finish_pretrain: True\n")
-                else:
-                    f.write(line)
+    _write_version_field("finish_pretrain", "True")
 
-def get_current_phase():
-    if os.path.exists(config.VERSION_FILE):
-        with open(config.VERSION_FILE, "r") as f:
-            for line in f:
-                if line.startswith("current_phase:"):
-                    return int(line.split(":")[1].strip())
-    return 0
 
-def get_phase_iteration():
-    if os.path.exists(config.VERSION_FILE):
-        with open(config.VERSION_FILE, "r") as f:
-            for line in f:
-                if line.startswith("phase_iteration:"):
-                    return int(line.split(":")[1].strip())
-    return 0
+def get_current_phase() -> int:
+    return _read_version_field("current_phase", 0)
 
-def increment_phase_iteration():
-    phase_iteration = get_phase_iteration()
-    new_iteration = phase_iteration + 1
-    
-    if os.path.exists(config.VERSION_FILE):
-        with open(config.VERSION_FILE, "r") as f:
-            lines = f.readlines()
-            
-        with open(config.VERSION_FILE, "w") as f:
-            has_phase_iter = False
-            for line in lines:
-                if line.startswith("phase_iteration:"):
-                    f.write(f"phase_iteration: {new_iteration}\n")
-                    has_phase_iter = True
-                else:
-                    f.write(line)
-            if not has_phase_iter:
-                f.write(f"phase_iteration: {new_iteration}\n")
-    return new_iteration
 
-def advance_curriculum_phase():
-    current_phase = get_current_phase()
-    new_phase = min(len(config.PHASES_CONFIG) - 1, current_phase + 1)
-    
-    if os.path.exists(config.VERSION_FILE):
-        with open(config.VERSION_FILE, "r") as f:
-            lines = f.readlines()
-            
-        with open(config.VERSION_FILE, "w") as f:
-            has_phase_iter = False
-            for line in lines:
-                if line.startswith("current_phase:"):
-                    f.write(f"current_phase: {new_phase}\n")
-                elif line.startswith("phase_iteration:"):
-                    f.write("phase_iteration: 0\n")
-                    has_phase_iter = True
-                else:
-                    f.write(line)
-            if not has_phase_iter:
-                f.write("phase_iteration: 0\n")
+def get_phase_iteration() -> int:
+    return _read_version_field("phase_iteration", 0)
+
+
+def increment_phase_iteration() -> int:
+    new_val = get_phase_iteration() + 1
+    _write_version_field("phase_iteration", new_val)
+    return new_val
+
+
+def advance_curriculum_phase() -> int:
+    current = get_current_phase()
+    new_phase = min(len(config.PHASES_CONFIG) - 1, current + 1)
+    _write_version_field("current_phase", new_phase)
+    _write_version_field("phase_iteration", 0)
     return new_phase
 
-def get_best_model_path():
-    """
-    Return:
-    storage/models/best.pth (actually logs/run_x/best.pth.tar to match our structure)
-    """
-    print ("Load best model",config.get_current_model_dir(), "best.pth.tar")
-    return os.path.join(config.get_current_model_dir(), "best.pth.tar")
 
-def get_latest_model_path(version=None):
+# ─────────────────────────────────────────────────────────────────────────────
+# Best overall score persistence
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_best_overall_score() -> float:
+    return _read_version_field("best_overall_score", 0.0)
+
+
+def set_best_overall_score(score: float):
+    _write_version_field("best_overall_score", f"{score:.6f}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Checkpoint path helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_model_dir() -> str:
+    return config.get_current_model_dir()
+
+
+def get_candidate_path() -> str:
+    return os.path.join(get_model_dir(), "checkpoint_candidate.pth.tar")
+
+
+def get_current_model_path() -> str:
     """
-    Return:
-    storage/models/latest.pth (actually logs/run_x/checkpoint_{version}.pth.tar)
+    Returns the path to the latest promoted checkpoint (self/current).
+    Falls back to best.pth.tar if checkpoint_current does not exist yet.
     """
+    current_path = os.path.join(get_model_dir(), "checkpoint_current.pth.tar")
+    if os.path.exists(current_path):
+        return current_path
+    # Backward-compat fallback
+    return get_best_model_path()
+
+
+def get_best_model_path() -> str:
+    return os.path.join(get_model_dir(), "best.pth.tar")
+
+
+def get_latest_model_path(version=None) -> str:
     if version is None:
         version = get_current_version()
-    
-    return os.path.join(config.get_current_model_dir(), f"checkpoint_{version}.pth.tar")
+    return os.path.join(get_model_dir(), f"checkpoint_{version}.pth.tar")
+
+
+def get_past_dir() -> str:
+    past_dir = os.path.join(get_model_dir(), "past")
+    os.makedirs(past_dir, exist_ok=True)
+    return past_dir
+
+
+def get_past_model_paths() -> list:
+    """Return sorted list of all past checkpoint paths."""
+    past_dir = get_past_dir()
+    paths = sorted(glob.glob(os.path.join(past_dir, "checkpoint_*.pth.tar")))
+    return paths
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Checkpoint management
+# ─────────────────────────────────────────────────────────────────────────────
 
 def save_latest_model(model):
     """
-    Save candidate model with optimizer and scheduler states for full training continuity.
+    Save candidate model with optimizer and scheduler states.
+    Written to checkpoint_candidate.pth.tar.
     """
-    filepath = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
+    filepath = get_candidate_path()
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    
+
     state = {}
-    if hasattr(model, 'nnet'):
-        # Full NNetWrapper — save model, optimizer and scheduler
-        state['state_dict'] = model.nnet.state_dict()
-        if hasattr(model, 'optimizer'):
-            state['optimizer'] = model.optimizer.state_dict()
-        if hasattr(model, 'scheduler'):
-            state['scheduler'] = model.scheduler.state_dict()
-    elif hasattr(model, 'state_dict'):
-        state['state_dict'] = model.state_dict()
+    if hasattr(model, "nnet"):
+        state["state_dict"] = model.nnet.state_dict()
+        if hasattr(model, "optimizer"):
+            state["optimizer"] = model.optimizer.state_dict()
+        if hasattr(model, "scheduler"):
+            state["scheduler"] = model.scheduler.state_dict()
+    elif hasattr(model, "state_dict"):
+        state["state_dict"] = model.state_dict()
     else:
-        state = model  # fallback: already a dict
+        state = model  # already a dict
 
     torch.save(state, filepath)
     return filepath
 
+
+def promote_to_current():
+    """
+    Promote candidate → current/self.
+
+    Actions:
+      1. Increment version counter.
+      2. Copy candidate → checkpoint_current.pth.tar   (workers' self model)
+      3. Copy candidate → past/checkpoint_N.pth.tar    (history)
+    """
+    new_version = increase_version()
+    candidate = get_candidate_path()
+    model_dir = get_model_dir()
+    os.makedirs(model_dir, exist_ok=True)
+
+    if not os.path.exists(candidate):
+        print(f"[ModelManager] WARNING: candidate not found at {candidate}")
+        return new_version
+
+    # 1. current/self checkpoint
+    current_path = os.path.join(model_dir, "checkpoint_current.pth.tar")
+    shutil.copyfile(candidate, current_path)
+    print(f"[ModelManager] Promoted candidate → checkpoint_current  (v{new_version})")
+
+    # 2. numbered latest checkpoint (for backward compat)
+    latest_path = get_latest_model_path(new_version)
+    shutil.copyfile(candidate, latest_path)
+
+    # 3. historical past copy
+    past_path = os.path.join(get_past_dir(), f"checkpoint_{new_version}.pth.tar")
+    shutil.copyfile(candidate, past_path)
+    print(f"[ModelManager] Saved to past → {past_path}")
+
+    return new_version
+
+
+def update_best():
+    """
+    Update best.pth.tar to the current candidate.
+    Called independently from promote_to_current when the candidate
+    scores >= BEST_UPDATE_SCORE_RATIO × current best score.
+    """
+    candidate = get_candidate_path()
+    best_path = get_best_model_path()
+    os.makedirs(os.path.dirname(best_path), exist_ok=True)
+
+    if os.path.exists(candidate):
+        shutil.copyfile(candidate, best_path)
+        print(f"[ModelManager] Updated best.pth.tar from candidate.")
+    else:
+        print(f"[ModelManager] WARNING: candidate not found, best.pth.tar not updated.")
+
+
 def promote_best_model():
     """
-    Replace:
-
-    latest.pth
-          |
-          v
-    best.pth
-
-    Then:
-        increase version
+    Legacy compatibility shim: promote candidate to both current and best.
+    Prefer calling promote_to_current() + update_best() separately.
     """
-    # 1. Increase the version
-    new_version = increase_version()
-    
-    candidate_path = os.path.join(config.get_current_model_dir(), f"checkpoint_candidate.pth.tar")
-    new_latest_path = get_latest_model_path(new_version)
-    best_path = get_best_model_path()
-    
-    if os.path.exists(candidate_path):
-        os.makedirs(os.path.dirname(best_path), exist_ok=True)
-        # 2. Save it as the new latest checkpoint
-        shutil.copyfile(candidate_path, new_latest_path)
-        # 3. Promote it to best
-        shutil.copyfile(candidate_path, best_path)
+    promote_to_current()
+    update_best()
+
 
 def load_model(filepath):
-    """
-    Load PyTorch model state_dict.
-    """
+    """Load PyTorch model state_dict from file."""
     if not os.path.exists(filepath):
         return None
-        
-    state_dict = torch.load(filepath, map_location='cpu', weights_only=False)
-    if 'state_dict' in state_dict:
-        return state_dict['state_dict']
+    state_dict = torch.load(filepath, map_location="cpu", weights_only=False)
+    if "state_dict" in state_dict:
+        return state_dict["state_dict"]
     return state_dict

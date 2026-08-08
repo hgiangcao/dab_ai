@@ -1,3 +1,15 @@
+"""
+evaluator.py — Candidate Model Evaluation
+
+Promotion: BOTH conditions must pass
+PROMOTION_BOT_SCORE_RATIO = 0.80  # candidate_overall_bot_score >= this × best_overall_bot_score
+MIN_WINRATE_VS_CURRENT    = 0.55  # winrate vs current checkpoint threshold
+
+Best-model update: candidate qualifies when its overall bot score is at least
+this fraction of the stored best score
+BEST_UPDATE_SCORE_RATIO = 0.90
+"""
+
 import os
 import sys
 import numpy as np
@@ -6,7 +18,6 @@ from tqdm import tqdm
 import multiprocessing
 import torch
 
-# Add parent dir to path to import game, model, mcts
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 
@@ -16,311 +27,307 @@ from game import DotsAndBoxesGame
 from model import NNetWrapper, dotdict
 from mcts import MCTS
 
-# Default evaluation arguments
+# ─────────────────────────────────────────────────────────────────────────────
+# Evaluation MCTS args — deterministic CPU inference
+# ─────────────────────────────────────────────────────────────────────────────
 eval_args = dotdict({
     'lr': config.LEARNING_RATE,
     'epochs': config.EPOCHS,
     'batch_size': config.BATCH_SIZE,
     'num_channels': 256,
-    'num_res_blocks': 10, 
+    'num_res_blocks': 10,
     'l2_reg': 1e-4,
     'n_simulations': config.MCTS_NUM_SIMULATIONS,
     'c_puct': config.MCTS_C_PUCT,
-    'dirichlet_eps': 0.0,
+    'dirichlet_eps': 0.0,        # no noise during evaluation
     'dirichlet_alpha': config.MCTS_DIRICHLET_ALPHA,
-    'time_limit': None,  # Use simulation-count mode (MCTS_NUM_SIMULATIONS), never time-limited
-    'device': 'cpu'  # CPU allows us to run evaluation in parallel efficiently
+    'time_limit': None,
+    'device': 'cpu',
 })
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-process worker — plays one game
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _worker_play_single(worker_args):
     """
     Isolated worker to execute a single evaluation match.
-    Runs one game in parallel.
+    Returns (result, avg_depth) where result ∈ {1, -1, 0} from candidate's POV.
     """
     candidate_path, opp_identifier, p1_starts = worker_args
     import copy
-    
+
     game = DotsAndBoxesGame(size=5, starting_player=1, early_stopping=True)
-    
-    # 1. Candidate Model
+
+    # ── Candidate (always uses MCTS) ──────────────────────────────────────
     cand_net = NNetWrapper(game, eval_args)
     cand_state = torch.load(candidate_path, map_location='cpu', weights_only=False)
-    cand_net.nnet.load_state_dict(cand_state['state_dict'] if 'state_dict' in cand_state else cand_state)
+    cand_net.nnet.load_state_dict(
+        cand_state['state_dict'] if 'state_dict' in cand_state else cand_state
+    )
     cand_net.nnet.eval()
     mcts_cand = MCTS(cand_net, eval_args)
-    
-    # Helper to get diverse MCTS actions
+
     def get_eval_action(mcts_instance, g):
+        """Temp=1.0 for first 4 moves (diversity), then greedy."""
         move_number = np.count_nonzero(g.l)
-        # Use temp=1.0 for first 4 moves to force game diversity, then deterministic max play
         t = 1.0 if move_number < 4 else 0.0
         pi = mcts_instance.play(g, temp=t)
         if t > 0:
             return np.random.choice(len(pi), p=pi)
-        else:
-            return np.argmax(pi)
-            
+        return int(np.argmax(pi))
+
     def agent_cand(g):
         return get_eval_action(mcts_cand, g)
-        
-    # 2. Opponent (Best Model or Baseline)
-    if opp_identifier == "random":
-        import random
-        def agent_opp(g):
-            valid = g.get_valid_moves()
-            return random.choice(valid) if valid else None
-    elif opp_identifier == "alpha_beta_0.1s":
-        from bots.alpha_beta import AlphaBetaPlayer
-        baseline = AlphaBetaPlayer(name="AlphaBeta_0.1s", time_limit=0.1)
-        def agent_opp(g):
-            return baseline.get_move(copy.deepcopy(g))
-    elif opp_identifier == "mcts_0.1s":
-        from bots.mcts_x import MCTSGAgent
-        baseline = MCTSGAgent(name="MCTS_0.1s", time_limit=0.1)
-        def agent_opp(g):
-            return baseline.get_move(copy.deepcopy(g))
-    elif opp_identifier == "greedy":
+
+    # ── Opponent ──────────────────────────────────────────────────────────
+    if opp_identifier == "greedy":
         from bots.greedy import GreedyPlayer
         baseline = GreedyPlayer(name="Greedy")
-        def agent_opp(g):
-            return baseline.get_move(copy.deepcopy(g))
+        def agent_opp(g): return baseline.get_move(copy.deepcopy(g))
+
     elif opp_identifier == "greedy_chain":
         from bots.greedy_improve import GreedyChainPlayer
         baseline = GreedyChainPlayer(name="GreedyChain")
-        def agent_opp(g):
-            return baseline.get_move(copy.deepcopy(g))
-    elif opp_identifier == "ucla_bot_v3":
-        from bots.ucla_bot import UCLABot_v3
-        baseline = UCLABot_v3(name="UCLABot_v3")
-        def agent_opp(g):
-            return baseline.get_move(copy.deepcopy(g))
+        def agent_opp(g): return baseline.get_move(copy.deepcopy(g))
+
     elif opp_identifier == "simple_bot":
         from bots.simple_bot import SimpleBot
         baseline = SimpleBot(name="SimpleBot")
-        def agent_opp(g):
-            return baseline.get_move(copy.deepcopy(g))
+        def agent_opp(g): return baseline.get_move(copy.deepcopy(g))
+
     elif opp_identifier == "simple_bot_v2":
         from bots.simple_bot_v2 import SimpleBotV2
         baseline = SimpleBotV2(name="SimpleBotV2")
-        def agent_opp(g):
-            return baseline.get_move(copy.deepcopy(g))
+        def agent_opp(g): return baseline.get_move(copy.deepcopy(g))
+
+    elif opp_identifier == "ucla_bot_v3":
+        from bots.ucla_bot import UCLABot_v3
+        baseline = UCLABot_v3(name="UCLABot_v3")
+        def agent_opp(g): return baseline.get_move(copy.deepcopy(g))
+
     else:
-        # opp_identifier is best_path
+        # opp_identifier is a model checkpoint path
         if os.path.exists(opp_identifier):
-            best_net = NNetWrapper(game, eval_args)
-            best_state = torch.load(opp_identifier, map_location='cpu', weights_only=False)
-            best_net.nnet.load_state_dict(best_state['state_dict'] if 'state_dict' in best_state else best_state)
-            best_net.nnet.eval()
-            mcts_best = MCTS(best_net, eval_args)
-            
-            def agent_opp(g):
-                return get_eval_action(mcts_best, g)
+            opp_net = NNetWrapper(game, eval_args)
+            opp_state = torch.load(opp_identifier, map_location='cpu', weights_only=False)
+            opp_net.nnet.load_state_dict(
+                opp_state['state_dict'] if 'state_dict' in opp_state else opp_state
+            )
+            opp_net.nnet.eval()
+            mcts_opp = MCTS(opp_net, eval_args)
+            def agent_opp(g): return get_eval_action(mcts_opp, g)
         else:
             import random
             def agent_opp(g):
                 valid = g.get_valid_moves()
                 return random.choice(valid) if valid else None
-    # Assign turns
-    players = {1: agent_cand, -1: agent_opp} if p1_starts else {1: agent_opp, -1: agent_cand}
 
+    # ── Play the game ─────────────────────────────────────────────────────
+    players = {1: agent_cand, -1: agent_opp} if p1_starts else {1: agent_opp, -1: agent_cand}
     depths = []
+
     while game.is_running():
         cur_player = game.current_player
         action = players[cur_player](game)
-        
-        # If the candidate just played, record its max search depth.
-        # max_depth_reached == -1 means a rule-based shortcut fired; exclude from avg.
+        # Track candidate MCTS depth
         if (p1_starts and cur_player == 1) or (not p1_starts and cur_player == -1):
             if mcts_cand.max_depth_reached >= 0:
                 depths.append(mcts_cand.max_depth_reached)
-            
         game.execute_move(action)
 
-    # Return 1 if candidate won, -1 if opponent won, 0 for draw
     result = game.result if p1_starts else -game.result
     avg_depth = sum(depths) / len(depths) if depths else 0
     return result, avg_depth
 
 
-def play_game(model1_path, model2_path, p1_starts=True):
-    """
-    Play one game.
-    Return:
-        1 for MODEL1 (candidate)
-       -1 for MODEL2 (best)
-        0 for DRAW
-    """
-    return _worker_play_single((model1_path, model2_path, p1_starts))
+# ─────────────────────────────────────────────────────────────────────────────
+# Arena evaluation helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
+def _run_arena(candidate_path: str, opp_identifier: str, num_games: int) -> dict:
+    """
+    Run num_games between candidate and opp_identifier.
+    Returns {"wins", "losses", "draws", "win_rate", "avg_depth"}.
+    """
+    half = num_games // 2
+    worker_args_list = [
+        (candidate_path, opp_identifier, idx < half)
+        for idx in range(num_games)
+    ]
 
-def evaluate_model(candidate_model_path, best_model_path, num_games):
-    """
-    Run evaluation games in parallel across multiple CPU cores.
-    Return a summary dictionary.
-    """
-    wins = 0
-    losses = 0
-    draws = 0
-    
-    worker_args_list = []
-    total_depth = 0.0
-    half_games = num_games // 2
-    for idx in range(num_games):
-        p1_starts = idx < half_games
-        worker_args_list.append((candidate_model_path, best_model_path, p1_starts))
-        
     mp_context = multiprocessing.get_context('spawn')
     num_workers = max(1, min(config.MAX_WORKERS, multiprocessing.cpu_count() - 1))
-    
-    print(f"Evaluating candidate model over {num_games} arena games using {num_workers} processes...")
-    
-    win_threshold = int(num_games * config.PROMOTION_THRESHOLD)
-    loss_threshold = num_games - win_threshold
-    
-    completed_games = 0
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers, mp_context=mp_context) as executor:
+
+    wins, losses, draws = 0, 0, 0
+    total_depth = 0.0
+    completed = 0
+
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=num_workers, mp_context=mp_context
+    ) as executor:
         futures = [executor.submit(_worker_play_single, arg) for arg in worker_args_list]
-        for future in tqdm(concurrent.futures.as_completed(futures), total=num_games, desc="Arena Eval"):
+        for future in tqdm(
+            concurrent.futures.as_completed(futures),
+            total=num_games,
+            desc=f"Arena [{opp_identifier if len(opp_identifier) < 30 else 'model'}]",
+        ):
             try:
                 res, depth = future.result()
                 total_depth += depth
-                completed_games += 1
+                completed += 1
                 if res == 1:
                     wins += 1
                 elif res == -1:
                     losses += 1
                 else:
                     draws += 1
-                    
-                if wins > win_threshold or losses > loss_threshold:
-                    print(f"\nEarly stopping evaluation! Wins: {wins}, Losses: {losses} (Threshold: {win_threshold})")
-                    for f in futures:
-                        f.cancel()
-                    break
             except Exception as e:
-                print(f"Match execution failed: {e}")
-                
-    avg_depth = total_depth / completed_games if completed_games > 0 else 0             
-    total_decisive = wins + losses
-    win_rate = wins / total_decisive if total_decisive > 0 else 0.5
-    
-    print(f"Vs Best -> Wins: {wins} | Losses: {losses} | Draws: {draws} (Win Rate: {win_rate:.2%})")
-    print(f"Candidate MCTS Average Search Depth: {avg_depth:.2f}")
+                print(f"Match failed: {e}")
 
-    return {
-        "wins": wins,
-        "loss": losses,
-        "draw": draws,
-        "win_rate": win_rate,
-        "avg_depth": avg_depth
-    }
+    decisive = wins + losses
+    win_rate = wins / decisive if decisive > 0 else 0.5
+    avg_depth = total_depth / completed if completed > 0 else 0.0
+    return {"wins": wins, "losses": losses, "draws": draws,
+            "win_rate": win_rate, "avg_depth": avg_depth}
 
 
-def should_promote(result):
-    """
-    Decide if candidate becomes best based on win_rate > PROMOTION_THRESHOLD
-    """
-    return result["win_rate"] >= config.PROMOTION_THRESHOLD
+# ─────────────────────────────────────────────────────────────────────────────
+# Public evaluation API
+# ─────────────────────────────────────────────────────────────────────────────
 
-
-def evaluate_baselines(candidate_model_path, num_games=10):
-    """
-    Run evaluation games against heuristic baselines.
-    """
-    baselines = {
-        "greedy": "Greedy",
-        "greedy_chain": "GreedyChain",
-        "ucla_bot_v3": "UCLABot_v3",
-        "simple_bot": "SimpleBot",
-        "simple_bot_v2": "SimpleBotV2"
-    }
-    
-    baseline_win_rates = {}
-    
-    mp_context = multiprocessing.get_context('spawn')
-    num_workers = max(1, min(config.MAX_WORKERS, multiprocessing.cpu_count() - 1))
-    
-    for opp_id, opp_name in baselines.items():
-        print(f"Evaluating candidate against {opp_name}...")
-        wins, losses, draws = 0, 0, 0
-        total_depth = 0.0
-        worker_args_list = []
-        half_games = num_games // 2
-        for idx in range(num_games):
-            p1_starts = idx < half_games
-            worker_args_list.append((candidate_model_path, opp_id, p1_starts))
-            
-        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers, mp_context=mp_context) as executor:
-            futures = [executor.submit(_worker_play_single, arg) for arg in worker_args_list]
-            for future in tqdm(concurrent.futures.as_completed(futures), total=num_games, desc=f"Vs {opp_name}"):
-                try:
-                    res, depth = future.result()
-                    total_depth += depth
-                    if res == 1:
-                        wins += 1
-                    elif res == -1:
-                        losses += 1
-                    else:
-                        draws += 1
-                except Exception as e:
-                    print(f"Match execution failed: {e}")
-                    
-        total_decisive = wins + losses
-        win_rate = wins / total_decisive if total_decisive > 0 else 0.5
-        avg_depth = total_depth / num_games if num_games > 0 else 0
-        print(f"Vs {opp_name} -> Wins: {wins} | Losses: {losses} | Draws: {draws} (Win Rate: {win_rate:.2%})")
-        print(f"Candidate MCTS Average Search Depth: {avg_depth:.2f}")
-        baseline_win_rates[opp_name] = win_rate
-        
-    return baseline_win_rates
+# External bots used for the absolute-strength benchmark
+EVAL_BOTS = ["greedy", "simple_bot_v2", "ucla_bot_v3"]
 
 
 def evaluate_new_model(iteration=None):
     """
-    High-level evaluation:
-    1. Load latest candidate
-    2. Load best
-    3. Run games vs best
-    4. Run games vs baselines (every 5 iterations)
-    5. Decide promotion
+    Full candidate evaluation with dual-condition promotion.
+
+    Promotion requires BOTH:
+      1. overall_bot_score >= config.PROMOTION_BOT_SCORE_RATIO × best_overall_bot_score
+         (candidate scores at least 80% as well as best model on the bot benchmark)
+      2. winrate_vs_current >= config.MIN_WINRATE_VS_CURRENT
+         (candidate shows local improvement vs the self checkpoint)
+
+    Best-model update (independent):
+      candidate_overall_bot_score >= config.BEST_UPDATE_SCORE_RATIO × stored_best_score
+
+    Returns:
+        promoted           (bool)   — candidate became current/self
+        updated_best       (bool)   — best.pth.tar was updated
+        bot_win_rates      (dict)   — {bot_name: win_rate}
+        winrate_vs_current (float)
+        avg_depth          (float)
     """
-    best_path = model_manager.get_best_model_path()
-    
-    # In distributed mode, trainer saves candidate model temporarily 
-    # to evaluate before officially committing it as a version.
-    candidate_path = os.path.join(config.get_current_model_dir(), "checkpoint_candidate.pth.tar")
-        
+    candidate_path = model_manager.get_candidate_path()
+    current_path   = model_manager.get_current_model_path()
+
     if not os.path.exists(candidate_path):
-        print(f"No candidate model found at {candidate_path} for evaluation.")
-        return False, 0.0, {}, 0
-        
-    baseline_win_rates = {}
-    if iteration is None or iteration % 2 == 0:
-        print(f"\n================ EVALUATION VS BEST ({config.EVAL_GAMES} games) ================")
-        result = evaluate_model(candidate_path, best_path, config.EVAL_GAMES)
-        
-        print(f" Wins:   {result['wins']}")
-        print(f" Losses: {result['loss']}")
-        print(f" Draws:  {result['draw']}")
-        print(f" Win Rate: {result['win_rate']:.2%}")
-        print("================================================================")
-        
-        if iteration is None or iteration % 10 == 0:
-            print(f"\n================ EVALUATION VS BASELINES =======================")
-            baseline_win_rates = evaluate_baselines(candidate_path, num_games=10)
-            print("================================================================")
-        
-        if should_promote(result):
-            print(f"Result exceeds threshold ({config.PROMOTION_THRESHOLD:.2%}). Model promoted to BEST.")
-            model_manager.promote_best_model()
-            return True, result['win_rate'], baseline_win_rates, result['avg_depth']
-        else:
-            print("Model did not exceed threshold. Rejected.")
-            return False, result['win_rate'], baseline_win_rates, result['avg_depth']
-            
+        print(f"[Eval] No candidate found at {candidate_path}.")
+        return False, False, {}, 0.0, 0.0
+
+    # ── 1. Screen against external bots (10 games each) ──────────────────
+    print("\n" + "="*60)
+    print(f"EVALUATION: {config.EVAL_GAMES_VS_BOTS} games × {len(EVAL_BOTS)} bots  +  "
+          f"{config.EVAL_GAMES_VS_CURRENT} games vs current")
+    print("="*60)
+
+    bot_win_rates = {}
+
+    for bot_name in EVAL_BOTS:
+        print(f"\n  ── vs {bot_name} ({config.EVAL_GAMES_VS_BOTS} games) ──")
+        result = _run_arena(candidate_path, bot_name, config.EVAL_GAMES_VS_BOTS)
+        wr = result["win_rate"]
+        bot_win_rates[bot_name] = wr
+        print(f"  {bot_name}: {result['wins']}W / {result['losses']}L / {result['draws']}D  "
+              f"WR={wr:.2%}")
+
+    overall_bot_score = sum(bot_win_rates.values()) / len(bot_win_rates) if bot_win_rates else 0.0
+
+    # Retrieve stored best score for the promotion gate
+    stored_best_score = model_manager.get_best_overall_score()
+    # If no best score has been recorded yet (first ever run), treat it as 0
+    # so any positive score passes.
+    bot_score_threshold = config.PROMOTION_BOT_SCORE_RATIO * stored_best_score
+
+    print(f"\n  Overall bot score: {overall_bot_score:.4f}  |  "
+          f"Required: {config.PROMOTION_BOT_SCORE_RATIO:.0%} × best {stored_best_score:.4f} "
+          f"= {bot_score_threshold:.4f}")
+
+    # ── 2. Screen vs current checkpoint (50 games) ───────────────────────
+    print(f"\n  ── vs current/self ({config.EVAL_GAMES_VS_CURRENT} games) ──")
+    if os.path.exists(current_path):
+        vs_current_result = _run_arena(candidate_path, current_path, config.EVAL_GAMES_VS_CURRENT)
+        winrate_vs_current = vs_current_result["win_rate"]
+        avg_depth = vs_current_result["avg_depth"]
+        print(f"  vs current: {vs_current_result['wins']}W / {vs_current_result['losses']}L / "
+              f"{vs_current_result['draws']}D  WR={winrate_vs_current:.2%}")
     else:
-        print(f"Skipping evaluation (Iteration {iteration}). Evaluation occurs every 2 iterations.")
-        return False, None, {}, 0.0
+        # No current model yet (first ever promotion) — auto-pass this check
+        print("  No current checkpoint found — skipping vs-current check (first promotion).")
+        winrate_vs_current = 1.0
+        avg_depth = 0.0
+
+    print(f"  Required vs-current WR: {config.MIN_WINRATE_VS_CURRENT:.2%}")
+
+    # ── 3. Promotion decision ─────────────────────────────────────────────
+    bot_condition     = overall_bot_score >= bot_score_threshold
+    current_condition = winrate_vs_current >= config.MIN_WINRATE_VS_CURRENT
+    promoted = bot_condition and current_condition
+
+    print("\n" + "─"*60)
+    print(f"  Bot score condition [{overall_bot_score:.4f} >= {config.PROMOTION_BOT_SCORE_RATIO:.0%} × {stored_best_score:.4f} = {bot_score_threshold:.4f}]: "
+          f"{'✓ PASS' if bot_condition else '✗ FAIL'}")
+    print(f"  Current condition   [{winrate_vs_current:.2%} >= {config.MIN_WINRATE_VS_CURRENT:.2%}]: "
+          f"{'✓ PASS' if current_condition else '✗ FAIL'}")
+    print(f"  Promotion decision: {'>>> PROMOTED <<<' if promoted else 'REJECTED'}")
+    print("─"*60)
+
+    if promoted:
+        model_manager.promote_to_current()
+        print("[Eval] Candidate promoted → checkpoint_current (self)")
+
+    # ── 4. Best-model update (independent) ───────────────────────────────
+    best_threshold = config.BEST_UPDATE_SCORE_RATIO * stored_best_score
+    updated_best = overall_bot_score >= best_threshold
+
+    print(f"\n  Best update check: candidate score {overall_bot_score:.4f} >= "
+          f"{config.BEST_UPDATE_SCORE_RATIO:.0%} × stored best {stored_best_score:.4f} "
+          f"= {best_threshold:.4f}  →  {'UPDATE BEST' if updated_best else 'keep old best'}")
+
+    if updated_best:
+        model_manager.update_best()
+        model_manager.set_best_overall_score(overall_bot_score)
+        print(f"[Eval] best.pth.tar updated. New best score: {overall_bot_score:.4f}")
+
+    print("="*60 + "\n")
+    return promoted, updated_best, bot_win_rates, winrate_vs_current, avg_depth
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Legacy helpers (kept for backward compatibility)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def evaluate_model(candidate_model_path, best_model_path, num_games):
+    """Legacy: evaluate candidate vs a specific model path."""
+    result = _run_arena(candidate_model_path, best_model_path, num_games)
+    return result
+
+
+def evaluate_baselines(candidate_model_path, num_games=10):
+    """Legacy: evaluate candidate vs all standard bots."""
+    rates = {}
+    for bot in EVAL_BOTS:
+        r = _run_arena(candidate_model_path, bot, num_games)
+        rates[bot] = r["win_rate"]
+    return rates
+
+
+def should_promote(result):
+    """Legacy: single-threshold promotion check."""
+    return result.get("win_rate", 0.0) >= config.PROMOTION_THRESHOLD
+
 
 if __name__ == "__main__":
     evaluate_new_model()
