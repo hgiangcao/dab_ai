@@ -45,7 +45,7 @@ MAX_REPLAY_SIZE = 20000
 MIN_REPLAY_SIZE = 2000
 
 # Evaluation defaults
-EVAL_GAMES_VS_BOTS    = 20   # games vs each external bot during screening
+EVAL_GAMES_VS_BOTS    = 40   # games vs each external bot during screening
 EVAL_GAMES_VS_CURRENT = 50   # games vs current/self checkpoint during screening
 
 # Promotion: BOTH conditions must pass
