@@ -85,6 +85,14 @@ def set_best_overall_score(score: float):
     _write_version_field("best_overall_score", f"{score:.6f}")
 
 
+def get_best_min_bot_winrate() -> float:
+    return _read_version_field("best_min_bot_winrate", 0.0)
+
+
+def set_best_min_bot_winrate(score: float):
+    _write_version_field("best_min_bot_winrate", f"{score:.6f}")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Checkpoint path helpers
 # ─────────────────────────────────────────────────────────────────────────────

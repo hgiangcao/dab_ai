@@ -449,7 +449,7 @@ def worker_play_single(worker_args):
         return game.result
     else:
         return -game.result
-
+'''
 
 class AlphaZeroTrainer:
     def __init__(self, game_size, nnet, pnet, mcts_class, args):
@@ -674,3 +674,5 @@ class AlphaZeroTrainer:
             print("\\nSaving Checkpoint...")
             self.nnet.save_checkpoint(folder=self.args.checkpoint_dir, filename=f'checkpoint_{i}.pth.tar')
             self.writer.flush()
+
+'''

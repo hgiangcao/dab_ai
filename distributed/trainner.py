@@ -242,8 +242,19 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
         if winrate_vs_current is not None:
             writer.add_scalar('Evaluation/WinRate_Vs_Current', winrate_vs_current, iteration)
             writer.add_scalar('Evaluation/MCTS_Avg_Depth',     avg_depth,           iteration)
+        
+        eval_opponents = {
+                "greedy": "Greedy",
+                "greedy_chain": "GreedyChain",
+                "ucla_bot_v3": "UCLABot_v3",
+                "simple_bot": "SimpleBot",
+                
+                "simple_bot_v2": "SimpleBotV2"
+            }
         for bot_name, wr in bot_win_rates.items():
-            writer.add_scalar(f'Evaluation/WinRate_Vs_{bot_name}', wr, iteration)
+            display_name = eval_opponents.get(bot_name, bot_name)
+            writer.add_scalar(f'Evaluation/WinRate_Vs_{display_name}', wr, iteration)
+            
         if bot_win_rates:
             min_wr     = min(bot_win_rates.values())
             overall_wr = sum(bot_win_rates.values()) / len(bot_win_rates)
