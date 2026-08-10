@@ -240,7 +240,7 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
 
     if writer:
         if winrate_vs_current is not None:
-            writer.add_scalar('Evaluation/WinRate_Vs_Current', winrate_vs_current, iteration)
+            writer.add_scalar('Evaluation/Win_Rate_Vs_Old', winrate_vs_current, iteration)
             writer.add_scalar('Evaluation/MCTS_Avg_Depth',     avg_depth,           iteration)
         
         eval_opponents = {
@@ -253,7 +253,7 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
             }
         for bot_name, wr in bot_win_rates.items():
             display_name = eval_opponents.get(bot_name, bot_name)
-            writer.add_scalar(f'Evaluation/WinRate_Vs_{display_name}', wr, iteration)
+            writer.add_scalar(f'Evaluation/Win_Rate_Vs_{display_name}', wr, iteration)
             
         if bot_win_rates:
             min_wr     = min(bot_win_rates.values())
