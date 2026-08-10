@@ -205,7 +205,7 @@ class SelfPlayGenerator:
         
 
         print ("Phase:", current_phase, "winrate", phase_winrate)
-                bot_stats_json = json.dumps(bot_stats)
+        bot_stats_json = json.dumps(bot_stats)
 
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         np.savez_compressed(
