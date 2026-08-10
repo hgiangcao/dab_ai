@@ -70,18 +70,41 @@ class SelfPlayGenerator:
         
 
         # 3. Setup episode specs for chunked multiprocessing
+        loss_games = []
+        loss_log_path = os.path.join(save_dir, "loss_game_log.jsonl")
+        if os.path.exists(loss_log_path):
+            with open(loss_log_path, "r") as f:
+                for line in f:
+                    if line.strip():
+                        loss_games.append(json.loads(line))
+            # Clear the log for the current epoch's new losses
+            os.remove(loss_log_path)
+            
+        n_loss_game = min(len(loss_games), num_games)
+        if n_loss_game > 0:
+            print(f"Loaded {n_loss_game} loss games from previous epoch for prefilling.")
+            
         episode_specs = []
-        for _ in range(num_games):
-            opp_type = np.random.choice([name for name, _ in current_pool], p=normalized_probs)
+        for i in range(num_games):
+            if i < n_loss_game:
+                lg = loss_games[i]
+                opp_type = lg.get("opp_type", "self")
+                opp_path = lg.get("opp_path", None)
+                prefilled_moves = lg.get("moves", [])
+            else:
+                opp_type = np.random.choice([name for name, _ in current_pool], p=normalized_probs)
+                opp_path = None
+                prefilled_moves = None
+                
             # Workers don't necessarily have server's "best" or "past" checkpoints readily available.
             # Revert them to "self" to guarantee execution.
             if opp_type in ["best", "past"]:
                 opp_type = "self"
                 
-            episode_specs.append((
-                opp_type,
-                None # opp_path is None because we don't have past checkpoints locally
-            ))
+            if prefilled_moves is not None:
+                episode_specs.append((opp_type, opp_path, prefilled_moves))
+            else:
+                episode_specs.append((opp_type, opp_path))
             
         # 4. Generate games using multiprocessing pool
         iteration_data = []
@@ -118,7 +141,7 @@ class SelfPlayGenerator:
                 chunk_size = futures[future]
                 try:
                     chunk_results = future.result()
-                    for examples, length, depth, opp_type, latest_won, latest_drawn in chunk_results:
+                    for examples, length, depth, opp_type, latest_won, latest_drawn, game_moves in chunk_results:
                         iteration_data.extend(examples)
                         if opp_type != "self":
                             if not latest_drawn:
@@ -133,6 +156,16 @@ class SelfPlayGenerator:
                             bot_stats[opp_type]['decisive'] += 1
                             if latest_won:
                                 bot_stats[opp_type]['wins'] += 1
+                                
+                        # Log loss games
+                        if not latest_won and not latest_drawn:
+                            with open(loss_log_path, "a") as f_log:
+                                record = {
+                                    "opp_type": opp_type,
+                                    "opp_path": None, # Usually None in self-play worker context
+                                    "moves": game_moves
+                                }
+                                f_log.write(json.dumps(record) + "\n")
                                 
                 except Exception as e:
                     import traceback

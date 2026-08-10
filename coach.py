@@ -260,7 +260,7 @@ def worker_execute_episode_chunk(worker_args):
         opponent_cache[key] = agent_opp
         return agent_opp
 
-    def run_episode(opp_type, opp_path):
+    def run_episode(opp_type, opp_path, prefilled_moves=None):
         if opp_type in ["best", "past"] and opp_path is None:
             opp_type = "self"
 
@@ -283,11 +283,33 @@ def worker_execute_episode_chunk(worker_args):
 
         episode_step = 0
         depths = []
+        game_moves = []
         temperature_initial = getattr(args, "temperature_initial", 1.0)
         temperature_medium = getattr(args, "temperature_medium", 0.5)
         temperature_final = getattr(args, "temperature_final", 0.0)
         drop_move = getattr(args, "temperature_drop_move", getattr(args, "temp_threshold", 40))
         medium_end_move = getattr(args, "temperature_medium_end_move", 55)
+
+        # --- PREFILL PHASE ---
+        if prefilled_moves:
+            for i, move in enumerate(prefilled_moves):
+                try:
+                    game.execute_move(move)
+                    game_moves.append(int(move))
+                except AssertionError:
+                    # Failsafe: if an invalid move is recorded, stop prefilling.
+                    break
+                
+                # If someone scored a point, stop prefilling immediately after this move.
+                if np.count_nonzero(game.b) > 0:
+                    break
+                    
+                # After 10 moves (index 9 is 10th move), 50% chance to stop prefill if score is still 0-0.
+                if i >= 9 and random.random() < 0.5:
+                    break
+                    
+            if game_moves:
+                last_action_for_mcts = game_moves[-1]
 
         while game.is_running():
             episode_step += 1
@@ -336,6 +358,7 @@ def worker_execute_episode_chunk(worker_args):
 
             try:
                 game.execute_move(action)
+                game_moves.append(int(action))
             except AssertionError as e:
                 agent_name = "self" if is_latest_turn else opp_type
                 raise AssertionError(f"Agent '{agent_name}' attempted invalid move {action}. Error: {e}") from e
@@ -359,7 +382,7 @@ def worker_execute_episode_chunk(worker_args):
 
         latest_won  = (r == 1 if p1_is_latest else r == -1)
         latest_drawn = (r == 0)
-        return final_examples, episode_step, avg_depth, opp_type, latest_won, latest_drawn
+        return final_examples, episode_step, avg_depth, opp_type, latest_won, latest_drawn, game_moves
 
     return [run_episode(*episode_spec) for episode_spec in episode_specs]
 
