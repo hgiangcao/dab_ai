@@ -211,7 +211,7 @@ def run_training_iteration(writer=None, iteration=0, nnet=None, replay_buffer=No
         combined_data = replay_data + pretrain_sample
         _rnd2.shuffle(combined_data)
         print(f"[Anchor] Sampled {n_sample:,} expert examples (buffer={len(pretrained_buffer):,}, "
-              f"next size will be {max(0, pretrained_sample_size - PRETRAIN_SAMPLE_DECAY):,}) "
+              f"next size will be {max(2000, pretrained_sample_size - PRETRAIN_SAMPLE_DECAY):,}) "
               f"→ total {len(combined_data):,} training samples")
         if writer:
             writer.add_scalar('Pretrained/Sample_Size',  n_sample,                 iteration)
@@ -438,8 +438,8 @@ def training_loop(load_checkpoint=None):
                 time.sleep(60)
             else:
                 iteration += 1
-                # Decay the sample size for next iteration (clamp at 0)
-                pretrained_sample_size = max(0, pretrained_sample_size - PRETRAIN_SAMPLE_DECAY)
+                # Decay the sample size for next iteration (clamp at 2000 to keep a baseline of expert data)
+                pretrained_sample_size = max(2000, pretrained_sample_size - PRETRAIN_SAMPLE_DECAY)
                 
         except Exception as e:
             print(f"Error during training iteration: {e}")
