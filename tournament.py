@@ -220,8 +220,8 @@ def main():
 
     # List of agent names to include in the tournament
     agent_names = [
-        "Random", 
-        "Greedy", 
+        # "Random", 
+        # "Greedy", 
         # "Greedy Chain",
         # "Alpha-Beta (0.1s)", 
         # "Alpha-Beta (0.5s)", 
@@ -235,7 +235,7 @@ def main():
         # "MCTS (200sims)",
         # "UCLABot",
         # "UCLABot_v2",
-        "UCLABot_v3",
+        # "UCLABot_v3",
         # "UCLABot_v4",
          "UCLABot_v6",
         # "UCLABot_v4",   
@@ -243,13 +243,13 @@ def main():
         # "UCLAAlphaBeta",
         # "UCLA_MCTS_100",
         # "UCLA_MCTS_200",
-        "SimpleBot",
+        #"SimpleBot",
         #"SimpleBot_v2",
         # "UCLA_MCTS_0.1",
         # "UCLA_MCTS_0.5",
         #"UCLA_MCTS_0.2",
         # "ARM_bot",
-        "fill_bot"
+        #"fill_bot"
 
     ]
     n_agents = len(agent_names)

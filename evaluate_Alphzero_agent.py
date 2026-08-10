@@ -100,10 +100,24 @@ def create_agent(name: str, size: int, model_path: str = "best.pth.tar", n_simul
         return RandomAgent()
     elif name == "AlphaZero":
         return AlphaZeroAgent(n_simulations=n_simulations, model_path=model_path)
+    elif name == "AlphaZero_500":
+        return AlphaZeroAgent(n_simulations=500, model_path=model_path)
+    elif name == "AlphaZero_1000":
+        return AlphaZeroAgent(n_simulations=1000, model_path=model_path)
+    elif name == "AlphaZero_300":
+        return AlphaZeroAgent(n_simulations=300, model_path=model_path)
+    elif name == "AlphaZero_200":
+        return AlphaZeroAgent(n_simulations=200, model_path=model_path)
+    elif name == "AlphaZero_100":
+        return AlphaZeroAgent(n_simulations=100, model_path=model_path)
+    elif name == "AlphaZero_0":
+        return AlphaZeroAgent(n_simulations=0, model_path=model_path)
     elif name == "MCTS (100sims)":
         return MCTSGAgent(name=name, n_simulations=100)
     elif name == "MCTS (200sims)":
         return MCTSGAgent(name=name, n_simulations=200)
+    elif name == "MCTS (300sims)":
+        return MCTSGAgent(name=name, n_simulations=300)
     elif name == "Greedy":
         return GreedyPlayer(name=name)
     elif name == "Greedy Chain":
@@ -214,7 +228,11 @@ def main():
         # "SimpleBot",
         # "SimpleBot_v2",
         # "UCLA_MCTS_0.1",
-        "UCLA_MCTS_0.2",
+        # "UCLA_MCTS_0.2",
+        "AlphaZero_100",
+        "AlphaZero_200",
+        "AlphaZero_300",
+        "AlphaZero_0",
     ]
 
     tasks = []

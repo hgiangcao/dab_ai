@@ -90,6 +90,23 @@ class MCTS:
             dirichlet_noise = np.zeros((root.s.N_LINES,), dtype=np.float64)
             dirichlet_noise[valid_moves] = np.random.dirichlet([self.dirichlet_alpha] * len(valid_moves))
 
+        # --- n_simulations == 0: pure NN policy, no tree search ---
+        # Query the network once and return its masked policy directly.
+        # Board → NN → π → argmax/sample. No visit counts involved.
+        if self.n_simulations == 0 and self.time_limit is None:
+            raw_p, _ = self.model.predict(self._encode_state(root.s))
+            nn_policy = self._mask_and_normalize_policy(raw_p, root.s.N_LINES, valid_moves)
+            if add_root_noise and dirichlet_noise is not None:
+                nn_policy = (1.0 - self.dirichlet_eps) * nn_policy + self.dirichlet_eps * dirichlet_noise
+                nn_policy = self._mask_and_normalize_policy(nn_policy, root.s.N_LINES, valid_moves)
+            self._root = root
+            if temp == 0:
+                probs = np.zeros(root.s.N_LINES, dtype=np.float64)
+                probs[int(np.argmax(nn_policy))] = 1.0
+                return probs.tolist()
+            total = float(nn_policy.sum())
+            return (nn_policy / total).tolist() if total > 0 else self._uniform_policy(root.s.N_LINES, valid_moves).tolist()
+
         if self.time_limit is not None:
             start_time = time.time()
             while time.time() - start_time < self.time_limit:
@@ -100,16 +117,6 @@ class MCTS:
 
         counts = np.array([root.N.get(a, 0) for a in range(root.s.N_LINES)], dtype=np.float64)
         counts_sum = float(counts.sum())
-
-        if counts_sum == 0:
-            fallback = self._root_policy(root, valid_moves, dirichlet_noise)
-            if temp == 0:
-                probs = np.zeros(root.s.N_LINES, dtype=np.float64)
-                probs[int(np.argmax(fallback))] = 1.0
-                self._root = root
-                return probs.tolist()
-            self._root = root
-            return fallback.tolist()
 
         if temp == 0:
             probs = np.zeros(root.s.N_LINES, dtype=np.float64)
@@ -136,29 +143,8 @@ class MCTS:
 
         # Leaf expansion: call NN once, cache policy and valid moves on this node
         if node.P is None:
-            size = node.s.SIZE
-            sp1 = size + 1
-
-            # Use pre-allocated buffer if available; create and cache it on first use.
-            # Clears to zero then fills in-place — avoids 8 numpy allocs per simulation.
-            buf = getattr(self, '_board_buf', None)
-            if buf is None or buf.shape != (4, sp1, sp1):
-                self._board_buf = np.zeros((4, sp1, sp1), dtype=np.float32)
-                buf = self._board_buf
-            else:
-                buf[:] = 0.0
-
-            canonical_lines = node.s.get_canonical_lines()
-            h, v = node.s.l_to_h_v(canonical_lines)
-            buf[0, :sp1, :size] = h          # horizontal lines
-            buf[1, :size, :sp1] = v          # vertical lines
-
-            canonical_boxes = node.s.get_canonical_boxes()
-            buf[2, :size, :size] = np.where(canonical_boxes == 1, 1.0, 0.0)   # p1 boxes
-            buf[3, :size, :size] = np.where(canonical_boxes == -1, 1.0, 0.0)  # p2 boxes
-
-            p, v = self.model.predict(buf)
-            v = float(np.asarray(v).reshape(-1)[0])
+            p, v_val = self.model.predict(self._encode_state(node.s))
+            v = float(np.asarray(v_val).reshape(-1)[0])
 
             # Cache valid_moves on the node — avoid redundant get_valid_moves() calls
             node.valid_moves = node.s.get_valid_moves()
@@ -222,6 +208,37 @@ class MCTS:
         # Update cached total_N for O(1) sqrt in select()
         node.total_N += 1
 
+    def _encode_state(self, s) -> np.ndarray:
+        """Encode a game state into the (4, size+1, size+1) float32 tensor expected by the NN.
+
+        Channels:
+            0 — horizontal lines (current player canonical)
+            1 — vertical   lines (current player canonical)
+            2 — boxes owned by current player
+            3 — boxes owned by opponent
+        """
+        size = s.SIZE
+        sp1 = size + 1
+
+        # Reuse a pre-allocated buffer to avoid per-call numpy allocations.
+        buf = getattr(self, '_board_buf', None)
+        if buf is None or buf.shape != (4, sp1, sp1):
+            self._board_buf = np.zeros((4, sp1, sp1), dtype=np.float32)
+            buf = self._board_buf
+        else:
+            buf[:] = 0.0
+
+        canonical_lines = s.get_canonical_lines()
+        h, v = s.l_to_h_v(canonical_lines)
+        buf[0, :sp1, :size] = h          # horizontal lines
+        buf[1, :size, :sp1] = v          # vertical lines
+
+        canonical_boxes = s.get_canonical_boxes()
+        buf[2, :size, :size] = np.where(canonical_boxes == 1,  1.0, 0.0)  # current-player boxes
+        buf[3, :size, :size] = np.where(canonical_boxes == -1, 1.0, 0.0)  # opponent boxes
+
+        return buf
+
     @staticmethod
     def _uniform_policy(n_actions: int, valid_moves: list) -> np.ndarray:
         probs = np.zeros(n_actions, dtype=np.float64)
@@ -250,6 +267,10 @@ class MCTS:
     def _root_policy(self, node: AZNode, valid_moves: list, dirichlet_noise: np.ndarray = None) -> np.ndarray:
         # node.P is already normalized and masked from leaf expansion.
         # Only re-mix if we have Dirichlet noise to add.
+        if node.P is None:
+            # Node was never expanded (e.g. n_simulations=0). Return uniform over valid moves
+            # so we never pick an already-drawn line via np.argmax(None) == 0.
+            return self._uniform_policy(node.s.N_LINES, valid_moves)
         if dirichlet_noise is None:
             return node.P
         base_policy = self._mask_and_normalize_policy(node.P, node.s.N_LINES, valid_moves)
