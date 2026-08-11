@@ -231,7 +231,7 @@ def main():
         # "UCLA_MCTS_0.2",
         "AlphaZero_100",
         "AlphaZero_200",
-        "AlphaZero_300",
+        # "AlphaZero_500",
         "AlphaZero_0",
     ]
 

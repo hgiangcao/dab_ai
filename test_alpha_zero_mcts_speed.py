@@ -1,4 +1,4 @@
-﻿"""
+"""
 test_alpha_zero_mcts_speed.py
 ─────────────────────────────
 Grid-search benchmark comparing AlphaZero inference speed across:
@@ -87,10 +87,10 @@ def count_nn_calls(mcts_obj):
 
 
 def measure(nnet, n_sims, game_state, repeats, warmup):
-    params = {"n_simulations":n_sims,"c_puct":config.MCTS_C_PUCT,
-              "dirichlet_eps":0.0,"dirichlet_alpha":config.MCTS_DIRICHLET_ALPHA}
+    params = {"n_simulations": n_sims, "c_puct": config.MCTS_C_PUCT,
+              "dirichlet_eps": 0.0, "dirichlet_alpha": config.MCTS_DIRICHLET_ALPHA}
     mcts_obj = MCTS(nnet, params)
-    times = []; nn_calls = []
+    times = []; nn_calls_list = []
     for i in range(warmup + repeats):
         mcts_obj.reset_tree()
         gs = game_state.clone(track_history=False)
@@ -99,15 +99,60 @@ def measure(nnet, n_sims, game_state, repeats, warmup):
         ms = (time.perf_counter() - t0) * 1000
         if i >= warmup:
             times.append(ms)
-            nn_calls.append(count_nn_calls(mcts_obj))
-    mean_ms = float(np.mean(times))
-    return {"mean_ms": mean_ms, "std_ms": float(np.std(times)),
-            "ms_per_sim": mean_ms / n_sims if n_sims > 0 else mean_ms,
-            "nn_calls": float(np.mean(nn_calls))}
+            nn_calls_list.append(count_nn_calls(mcts_obj))
+    mean_ms   = float(np.mean(times))
+    avg_nn    = float(np.mean(nn_calls_list))
+    # Saturation: if NN calls are much less than n_sims, the tree is exhausted
+    # and the measure is dominated by re-traversal, NOT inference speed.
+    saturated = (n_sims > 0) and (avg_nn < 0.80 * n_sims)
+    # ms/NN_call: the true cost of one useful (new-node) evaluation
+    ms_per_nn_call = mean_ms / avg_nn if avg_nn > 0 else mean_ms
+    return {
+        "mean_ms":       mean_ms,
+        "std_ms":        float(np.std(times)),
+        "ms_per_nn_call": ms_per_nn_call,
+        # Keep ms_per_sim for backward compat but don't use as primary metric
+        "ms_per_sim":    mean_ms / n_sims if n_sims > 0 else mean_ms,
+        "nn_calls":      avg_nn,
+        "saturated":     saturated,
+    }
 
 
 def param_count(nnet):
     return sum(p.numel() for p in nnet.nnet.parameters())
+
+
+def benchmark_nn_inference(ch: int, rb: int, device: str, model_path: str,
+                            n_calls: int = 200, warmup: int = 20) -> dict:
+    """
+    Time raw nnet.predict() calls directly — no MCTS.
+    This is the ONLY true measure of pure architecture inference speed.
+    Returns mean_ms, std_ms, calls_per_sec.
+    """
+    nnet = build_nnet(ch, rb, device, model_path)
+    dummy_game = DotsAndBoxesGame(size=BOARD_SIZE)
+
+    # Build a fixed board tensor for the timing loop
+    size = dummy_game.SIZE
+    sp1 = size + 1
+    board = np.zeros((4, sp1, sp1), dtype=np.float32)
+    board[0, :sp1, :size]  = 0.5   # some content so it's not all-zero
+    board[1, :size, :sp1]  = 0.5
+
+    times = []
+    for i in range(warmup + n_calls):
+        t0 = time.perf_counter()
+        nnet.predict(board)
+        ms = (time.perf_counter() - t0) * 1000
+        if i >= warmup:
+            times.append(ms)
+
+    return {
+        "mean_ms":      float(np.mean(times)),
+        "std_ms":       float(np.std(times)),
+        "calls_per_sec": 1000.0 / float(np.mean(times)),
+        "params":       param_count(nnet),
+    }
 
 
 def main():
@@ -146,6 +191,42 @@ def main():
     total_cells = len(MODEL_CONFIGS) * len(SIM_COUNTS) * len(STAGES)
     cell_idx = 0
 
+    # ── Step 1: Pure NN inference speed (the true architecture comparison) ────
+    print(f"\n{'━'*76}")
+    print("  STEP 1 — Pure NN Inference Speed  (raw nnet.predict() calls, no MCTS)")
+    print(f"{'━'*76}")
+    print(f"  {'Config':<15} {'Params':>12}  {'ms/call':>10}  {'±':>7}  {'calls/sec':>10}")
+    print("  " + "-" * 60)
+
+    nn_inference_results = {}
+    for ch, rb in MODEL_CONFIGS:
+        ck = f"{ch}ch x{rb}blk"
+        r  = benchmark_nn_inference(ch, rb, device, args.model_path,
+                                    n_calls=200, warmup=20)
+        nn_inference_results[ck] = r
+        print(f"  {ck:<15} {r['params']:>12,}  "
+              f"{r['mean_ms']:>10.3f}  "
+              f"±{r['std_ms']:>6.3f}  "
+              f"{r['calls_per_sec']:>10.1f} calls/s")
+
+    # Rank by ms/call
+    ranked = sorted(MODEL_CONFIGS,
+                    key=lambda c: nn_inference_results[f"{c[0]}ch x{c[1]}blk"]["mean_ms"])
+    print(f"\n  Fastest: {ranked[0][0]}ch x{ranked[0][1]}blk  "
+          f"({nn_inference_results[f'{ranked[0][0]}ch x{ranked[0][1]}blk']['mean_ms']:.3f} ms/call)")
+    print(f"  Slowest: {ranked[-1][0]}ch x{ranked[-1][1]}blk  "
+          f"({nn_inference_results[f'{ranked[-1][0]}ch x{ranked[-1][1]}blk']['mean_ms']:.3f} ms/call)")
+    speedup_nn = (nn_inference_results[f"{ranked[-1][0]}ch x{ranked[-1][1]}blk"]["mean_ms"]
+                  / nn_inference_results[f"{ranked[0][0]}ch x{ranked[0][1]}blk"]["mean_ms"])
+    print(f"  Inference speed-up (fastest vs slowest): {speedup_nn:.2f}×")
+    print()
+
+    # ── Step 2: MCTS grid search ──────────────────────────────────────────────
+    print(f"  STEP 2 — MCTS Grid Search  (primary metric: ms / NN-call)")
+    print(f"  NOTE: cells marked [SAT] mean the tree is exhausted")
+    print(f"  (nn_calls < 80% of n_sims). Those timings measure re-traversal,")
+    print(f"  NOT inference speed, and should be IGNORED for model comparison.")
+
     for ch, rb in MODEL_CONFIGS:
         ck = f"{ch}ch x{rb}blk"
         all_results[ck] = {}
@@ -162,16 +243,21 @@ def main():
                 m = measure(nnet, n_sims, stage_games[sl], args.repeats, args.warmup)
                 all_results[ck][n_sims][sl] = {**m, "params": params, "ch": ch, "rb": rb}
                 pct = cell_idx / total_cells * 100
-                print(f"  [{pct:5.1f}%] sims={n_sims:4d} | {sl:<14} | "
+                sat_flag = "[SAT]" if m["saturated"] else "     "
+                print(f"  [{pct:5.1f}%] {sat_flag} sims={n_sims:4d} | {sl:<14} | "
                       f"{m['mean_ms']:8.2f} ms (+-{m['std_ms']:.2f}) | "
-                      f"ms/sim={m['ms_per_sim']:.4f} | NN_calls~{m['nn_calls']:.0f}")
+                      f"ms/NN_call={m['ms_per_nn_call']:.4f} | "
+                      f"NN_calls~{m['nn_calls']:.0f}/{n_sims}")
 
-    # ── Per-stage mean-ms tables ──────────────────────────────────────────────
-    cw = 11; fw = 15
+    # ── Per-stage ms/NN_call tables ──────────────────────────────────────────
+    cw = 12; fw = 15
+    SAT = "[SAT]"
 
     for sl, ff in STAGES:
         print(f"\n\n{'='*76}")
-        print(f"  STAGE: {sl}  ({int(ff*100)}% lines filled)  —  mean move time (ms)")
+        print(f"  STAGE: {sl}  ({int(ff*100)}% lines filled)")
+        print(f"  Primary metric: ms / NN-call  (= mean_ms / actual_nn_calls)")
+        print(f"  [SAT] = tree exhausted; cell is invalid for speed comparison")
         print(f"{'='*76}")
         hdr = f"{'Config':<{fw}} {'Params':>10}"
         for s in SIM_COUNTS:
@@ -183,12 +269,19 @@ def main():
             p  = all_results[ck][SIM_COUNTS[0]][sl]["params"]
             row = f"{ck:<{fw}} {p:>10,}"
             for s in SIM_COUNTS:
-                row += f"{all_results[ck][s][sl]['mean_ms']:>{cw}.2f}"
-            print(row + " ms")
+                m = all_results[ck][s][sl]
+                if s == 0:
+                    # NN-only: ms/call is ms_per_nn_call (one real NN call)
+                    row += f"{m['mean_ms']:>{cw}.2f}"
+                elif m["saturated"]:
+                    row += f"{SAT:>{cw}}"
+                else:
+                    row += f"{m['ms_per_nn_call']:>{cw}.2f}"
+            print(row + " ms/NN")
 
-        # Speed-up vs full model
+        # Speed-up vs full model (only on non-saturated cells)
         full = "256ch x10blk"
-        print(f"\n  Speed-up vs {full}:")
+        print(f"\n  Speed-up vs {full}  (non-[SAT] cells only):")
         hdr2 = f"{'Config':<{fw}} {'Params':>10}"
         for s in SIM_COUNTS:
             hdr2 += f"{'NN' if s==0 else str(s)+'sim':>{cw}}"
@@ -199,16 +292,22 @@ def main():
             p  = all_results[ck][SIM_COUNTS[0]][sl]["params"]
             row = f"{ck:<{fw}} {p:>10,}"
             for s in SIM_COUNTS:
-                m_c  = all_results[ck][s][sl]["mean_ms"]
-                m_f  = all_results[full][s][sl]["mean_ms"]
-                su   = m_f / m_c if m_c > 0 else 0
-                row += f"{su:>{cw}.2f}x"
+                m_c  = all_results[ck][s][sl]
+                m_f  = all_results[full][s][sl]
+                if m_c["saturated"] or m_f["saturated"]:
+                    row += f"{'[SAT]':>{cw}}"
+                else:
+                    val_c = m_c["mean_ms"] if s == 0 else m_c["ms_per_nn_call"]
+                    val_f = m_f["mean_ms"] if s == 0 else m_f["ms_per_nn_call"]
+                    su    = val_f / val_c if val_c > 0 else 0
+                    row  += f"{su:>{cw}.2f}x"
             print(row)
 
-    # ── ms/simulation summary ─────────────────────────────────────────────────
+    # ── ms/NN_call summary across all configs ─────────────────────────────────
     sim_cols = [s for s in SIM_COUNTS if s > 0]
     print(f"\n\n{'='*76}")
-    print("  ms / simulation  (mean across all 3 stages)")
+    print("  ms / NN-call  (mean over valid, non-saturated cells across all 3 stages)")
+    print(f"  This is the CORRECT metric for comparing model inference speed")
     print(f"{'='*76}")
     hdr = f"{'Config':<{fw}}"
     for s in sim_cols: hdr += f"{str(s)+' sims':>{cw}}"
@@ -218,22 +317,64 @@ def main():
         ck  = f"{ch}ch x{rb}blk"
         row = f"{ck:<{fw}}"
         for s in sim_cols:
-            vals = [all_results[ck][s][sl]["ms_per_sim"] for sl, _ in STAGES]
-            row += f"{np.mean(vals):>{cw}.4f}"
-        print(row + " ms/sim")
+            valid_vals = [
+                all_results[ck][s][sl]["ms_per_nn_call"]
+                for sl, _ in STAGES
+                if not all_results[ck][s][sl]["saturated"]
+            ]
+            if valid_vals:
+                row += f"{np.mean(valid_vals):>{cw}.4f}"
+            else:
+                row += f"{'[SAT]':>{cw}}"
+        print(row + " ms/NN_call")
 
     # ── Best config per (stage, n_sims) ──────────────────────────────────────
     print(f"\n\n{'='*76}")
-    print("  Fastest config per (stage, n_sims):")
+    print("  Fastest config per (stage, n_sims)  — [SAT] cells excluded:")
     print(f"{'='*76}")
     for sl, _ in STAGES:
         for n_sims in SIM_COUNTS:
-            best = min(MODEL_CONFIGS,
-                       key=lambda c: all_results[f"{c[0]}ch x{c[1]}blk"][n_sims][sl]["mean_ms"])
-            bk  = f"{best[0]}ch x{best[1]}blk"
-            bms = all_results[bk][n_sims][sl]["mean_ms"]
+            valid = [
+                c for c in MODEL_CONFIGS
+                if not all_results[f"{c[0]}ch x{c[1]}blk"][n_sims][sl]["saturated"]
+            ]
+            if not valid:
+                print(f"  {sl:<14} | {'NN-only' if n_sims==0 else str(n_sims)+' sims':<10} | all cells saturated")
+                continue
+            metric = "mean_ms" if n_sims == 0 else "ms_per_nn_call"
+            best = min(valid, key=lambda c: all_results[f"{c[0]}ch x{c[1]}blk"][n_sims][sl][metric])
+            bk   = f"{best[0]}ch x{best[1]}blk"
+            bv   = all_results[bk][n_sims][sl][metric]
+            unit = "ms" if n_sims == 0 else "ms/NN_call"
             sstr = "NN-only" if n_sims == 0 else f"{n_sims:3d} sims"
-            print(f"  {sl:<14} | {sstr} | {bk}  ({bms:.2f} ms)")
+            print(f"  {sl:<14} | {sstr:<10} | {bk}  ({bv:.4f} {unit})")
+
+    # ── Pure NN inference ranking (the definitive answer) ─────────────────────
+    print(f"\n\n{'='*76}")
+    print("  DEFINITIVE RANKING — Pure NN Inference Speed")
+    print(f"  (nnet.predict() call, no MCTS overhead)")
+    print(f"{'='*76}")
+    ranked_all = sorted(
+        MODEL_CONFIGS,
+        key=lambda c: nn_inference_results[f"{c[0]}ch x{c[1]}blk"]["mean_ms"]
+    )
+    for rank, (ch, rb) in enumerate(ranked_all, 1):
+        ck  = f"{ch}ch x{rb}blk"
+        r   = nn_inference_results[ck]
+        ref = nn_inference_results[f"{ranked_all[-1][0]}ch x{ranked_all[-1][1]}blk"]["mean_ms"]
+        su  = ref / r["mean_ms"]
+        print(f"  #{rank}  {ck:<15}  {r['params']:>12,} params  "
+              f"{r['mean_ms']:>8.3f} ms  ±{r['std_ms']:.3f}  "
+              f"{r['calls_per_sec']:>8.1f} calls/s  ({su:.2f}x vs slowest)")
+
+    print(f"\n  Recommendation for fastest model with acceptable quality:")
+    # Suggest the model that is in the top-3 inference AND has >= 128 channels
+    candidates = [(ch, rb) for ch, rb in ranked_all if ch >= 128]
+    if candidates:
+        best_ch, best_rb = candidates[0]
+        best_ck = f"{best_ch}ch x{best_rb}blk"
+        print(f"  → {best_ck}  ({nn_inference_results[best_ck]['mean_ms']:.3f} ms/call, "
+              f"{nn_inference_results[best_ck]['params']:,} params)")
 
     # ── CSV ───────────────────────────────────────────────────────────────────
     if args.csv:
