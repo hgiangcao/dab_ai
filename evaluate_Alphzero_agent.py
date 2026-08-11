@@ -182,6 +182,17 @@ def run_single_game(args):
     last_move = None  # track last move so MCTS tree-reuse can advance past opponent's turn
     
     while game.is_running():
+        total_moves = a1_moves + a2_moves
+        if total_moves < 4:
+            move = random.choice(game.get_valid_moves())
+            if game.current_player == 1:
+                a1_moves += 1
+            else:
+                a2_moves += 1
+            last_move = move
+            game.execute_move(move)
+            continue
+
         if game.current_player == 1:
             start_t = time.time()
             # Inform agent1's tree of the opponent's last move before searching
@@ -231,7 +242,7 @@ def main():
         # "UCLA_MCTS_0.2",
         "AlphaZero_100",
         "AlphaZero_200",
-        # "AlphaZero_500",
+        "AlphaZero_300",
         "AlphaZero_0",
     ]
 

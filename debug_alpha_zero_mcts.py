@@ -31,10 +31,11 @@ def main():
         move_probs = [(move, prob) for move, prob in enumerate(pi) if prob > 1e-4]
         move_probs.sort(key=lambda x: x[1], reverse=True)
         
-        # Print top 10 moves
-        print(f"Top 10 moves (Move Number -> Probability):")
+        # Print top moves
+        print(f"Moves (Move Number -> Probability | Visits):")
         for move, prob in move_probs:
-            print(f"  Move {move:2d} : {prob:.4f}")
+            visits = agent.mcts._root.N.get(move, 0) if agent.mcts._root is not None else 0
+            print(f"  Move {move:2d} : {prob:.4f} | Visits: {visits}")
         print()
 
 if __name__ == "__main__":

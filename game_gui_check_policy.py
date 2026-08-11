@@ -394,41 +394,26 @@ class PolicyInspectorGUI:
             boxes_snap = game.b.copy()
 
             if cur == az_player:
-                if n_sims == 0:
-                    # AlphaZero 0-sim: pure NN policy
-                    board_enc = encode_state(game, self._nnet)
-                    policy_raw, value = self._nnet.predict(board_enc)
-    
-                    valid = game.get_valid_moves()
-                    masked = np.zeros(game.N_LINES, dtype=np.float64)
-                    masked[valid] = policy_raw[valid]
-                    s = masked.sum()
-                    if s > 0:
-                        masked /= s
-    
-                    move = int(np.argmax(masked))
-                    pol   = masked
-                    val   = float(value.flat[0]) if hasattr(value, 'flat') else float(value)
-                    visit_counts = None
-                    child_depths = None
-                else:
-                    # AlphaZero >0 sims: MCTS
-                    # We call with temp=1 to get the actual search probabilities (visit counts distribution)
-                    # for the GUI, but we still pick the single best move deterministically using argmax.
-                    pol = self._mcts.play(game, temp=1, add_root_noise=False, last_action=last_action)
-                    move = int(np.argmax(pol))
+                # AlphaZero plays via MCTS (handles 0 sims natively)
+                pol = self._mcts.play(game, temp=1, add_root_noise=False, last_action=last_action)
+                move = int(np.argmax(pol))
+                
+                # For 0 sims, visit counts and tree depths don't apply
+                if n_sims > 0 and self._mcts._root is not None:
                     visit_counts = [self._mcts._root.N.get(a, 0) for a in range(game.N_LINES)]
-                    
                     child_depths = {}
                     for a in range(game.N_LINES):
                         if a in self._mcts._root.children:
                             child_depths[a] = 1 + get_subtree_depth(self._mcts._root.children[a])
                         else:
                             child_depths[a] = 0
-                    
-                    # Just run the NN once to get the value for display
-                    _, value = self._nnet.predict(encode_state(game, self._nnet))
-                    val = float(value.flat[0]) if hasattr(value, 'flat') else float(value)
+                else:
+                    visit_counts = None
+                    child_depths = None
+                
+                # Just run the NN once to get the value for display
+                _, value = self._nnet.predict(encode_state(game, self._nnet))
+                val = float(value.flat[0]) if hasattr(value, 'flat') else float(value)
 
                 label = f"AlphaZero ({n_sims} sims)"
                 valid_count = len(game.get_valid_moves())
