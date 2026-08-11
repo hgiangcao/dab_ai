@@ -324,7 +324,6 @@ def worker_execute_episode_chunk(worker_args):
             is_latest_turn = (game.current_player == 1) == p1_is_latest
 
             if move_number < 4:
-                import random
                 valid_moves = game.get_valid_moves()
                 action = random.choice(valid_moves)
                 
