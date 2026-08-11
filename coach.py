@@ -285,10 +285,10 @@ def worker_execute_episode_chunk(worker_args):
         depths = []
         game_moves = []
         temperature_initial = getattr(args, "temperature_initial", 1.0)
-        temperature_medium = getattr(args, "temperature_medium", 0.5)
+        temperature_medium = getattr(args, "temperature_medium", 0.3)
         temperature_final = getattr(args, "temperature_final", 0.0)
-        drop_move = getattr(args, "temperature_drop_move", getattr(args, "temp_threshold", 40))
-        medium_end_move = getattr(args, "temperature_medium_end_move", 55)
+        drop_move = getattr(args, "temperature_drop_move", getattr(args, "temp_threshold", 25))
+        medium_end_move = getattr(args, "temperature_medium_end_move", 40)
 
         # --- PREFILL PHASE ---
         if prefilled_moves:

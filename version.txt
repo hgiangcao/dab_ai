@@ -1,4 +1,6 @@
-run: run_87
-last_updated_model: 0
-current_phase: 0
+run: run_88
+last_updated_model: 9
+current_phase: 7
 finish_pretrain: True
+best_overall_score: 0.975000
+best_min_bot_winrate: 0.950000

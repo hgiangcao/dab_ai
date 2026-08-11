@@ -107,6 +107,12 @@ class MCTS:
             total = float(nn_policy.sum())
             return (nn_policy / total).tolist() if total > 0 else self._uniform_policy(root.s.N_LINES, valid_moves).tolist()
 
+        # Expand root once before MCTS simulations
+        if root.P is None:
+            p, v_val = self.model.predict(self._encode_state(root.s))
+            root.valid_moves = valid_moves
+            root.P = self._mask_and_normalize_policy(p, root.s.N_LINES, valid_moves)
+
         if self.time_limit is not None:
             start_time = time.time()
             while time.time() - start_time < self.time_limit:
@@ -168,11 +174,7 @@ class MCTS:
         maximum = float('-inf')
         a_max = -1
 
-        # O(1) total_N lookup instead of O(children) sum()
-        # When total_N == 0 (first sim into this node), U = 0 for all actions,
-        # so the best action is determined purely by the prior P — matching the
-        # standard AlphaZero PUCT spec where sqrt(0) / (1+0) = 0.
-        N_sqrt = math.sqrt(node.total_N) if node.total_N > 0 else 0.0
+        N_sqrt = math.sqrt(node.total_N + 1.0)
 
         # Use cached valid_moves — no repeated get_valid_moves() call
         valid_moves = node.valid_moves
