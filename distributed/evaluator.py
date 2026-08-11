@@ -69,12 +69,14 @@ def _worker_play_single(worker_args):
     mcts_cand = MCTS(cand_net, eval_args)
 
     def get_eval_action(mcts_instance, g):
-        """Temp=1.0 for first 4 moves (diversity), then greedy."""
+        """Random for first 4 moves, then greedy."""
         move_number = np.count_nonzero(g.l)
-        t = 1.0 if move_number < 4 else 0.0
-        pi = mcts_instance.play(g, temp=t)
-        if t > 0:
-            return np.random.choice(len(pi), p=pi)
+        if move_number < 4:
+            import random
+            valid_moves = g.get_valid_moves()
+            return random.choice(valid_moves)
+        
+        pi = mcts_instance.play(g, temp=0.0)
         return int(np.argmax(pi))
 
     def agent_cand(g):
@@ -129,11 +131,19 @@ def _worker_play_single(worker_args):
 
     while game.is_running():
         cur_player = game.current_player
-        action = players[cur_player](game)
-        # Track candidate MCTS depth
-        if (p1_starts and cur_player == 1) or (not p1_starts and cur_player == -1):
-            if mcts_cand.max_depth_reached >= 0:
-                depths.append(mcts_cand.max_depth_reached)
+        move_number = np.count_nonzero(game.l)
+
+        if move_number < 4:
+            import random
+            valid_moves = game.get_valid_moves()
+            action = random.choice(valid_moves)
+        else:
+            action = players[cur_player](game)
+            # Track candidate MCTS depth
+            if (p1_starts and cur_player == 1) or (not p1_starts and cur_player == -1):
+                if mcts_cand.max_depth_reached >= 0:
+                    depths.append(mcts_cand.max_depth_reached)
+
         game.execute_move(action)
 
     result = game.result if p1_starts else -game.result
