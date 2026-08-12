@@ -19,108 +19,7 @@ except ImportError:
 
 from agent_interface import BaseAgent
 
-class RandomAgent(BaseAgent):
-    def __init__(self, name: str = "Random"):
-        super().__init__(name)
-
-    def get_move(self, game_state) -> int:
-        valid_moves = game_state.get_valid_moves()
-        if not valid_moves:
-            return None
-        return random.choice(valid_moves)
-
-def create_agent(name: str, size: int):
-    if name == "Random":
-        return RandomAgent()
-    # elif name == "Alpha-Beta (1s)":
-    #     from bots.alpha_beta import AlphaBetaPlayer
-    #     return AlphaBetaPlayer(name=name, time_limit=1.0)
-    # elif name == "Alpha-Beta v1 (1s)":
-    #     from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
-    #     return AlphaBetaPlayerV1(name=name, time_limit=1.0)
-    # elif name == "Alpha-Beta (0.1s)":
-    #     from bots.alpha_beta import AlphaBetaPlayer
-    #     return AlphaBetaPlayer(name=name, time_limit=0.1)
-    # elif name == "Alpha-Beta v1 (0.1s)":
-    #     from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
-    #    return AlphaBetaPlayerV1(name=name, time_limit=0.1)
-    elif name == "MCTS (100sims)":
-        from bots.mcts_x import MCTSGAgent
-        return MCTSGAgent(name=name, n_simulations=100)
-    elif name == "MCTS (200sims)":
-        from bots.mcts_x import MCTSGAgent
-        return MCTSGAgent(name=name, n_simulations=200)
-    # elif name == "MCTS (1000sims)":
-    #     from bots.mcts_x import MCTSGAgent
-    #     return MCTSGAgent(name=name, n_simulations=1000)
-    # elif name == "MCTS (1s)":
-    #     from bots.mcts_x import MCTSGAgent
-    #     return MCTSGAgent(name=name, time_limit=1.0)
-    # elif name == "Alpha-Beta (0.5s)":
-    #     from bots.alpha_beta import AlphaBetaPlayer
-    #     return AlphaBetaPlayer(name=name, time_limit=0.5)
-    # elif name == "Alpha-Beta v1 (0.5s)":
-    #     from bots.alpha_beta_v1 import AlphaBetaPlayer as AlphaBetaPlayerV1
-    #     return AlphaBetaPlayerV1(name=name, time_limit=0.5)
-    # elif name == "Alpha-Beta v2 (0.1s)":
-    #     from bots.alpha_beta_v2 import AlphaBetaPlayer as AlphaBetaPlayerV2
-    #     return AlphaBetaPlayerV2(name=name, time_limit=0.1)
-    # elif name == "Alpha-Beta v2 (0.5s)":
-    #     from bots.alpha_beta_v2 import AlphaBetaPlayer as AlphaBetaPlayerV2
-    #     return AlphaBetaPlayerV2(name=name, time_limit=0.5)
-    elif name == "Greedy":
-        from bots.greedy import GreedyPlayer
-        return GreedyPlayer(name=name)
-    elif name == "Greedy Chain":
-        from bots.greedy_improve import GreedyChainPlayer
-        return GreedyChainPlayer(name=name)
-    elif name == "UCLABot":
-        from bots.ucla_bot import UCLABot
-        return UCLABot(name=name)
-    elif name == "UCLABot_v2":
-        from bots.ucla_bot import UCLABot_v2
-        return UCLABot_v2(name=name)
-    elif name == "UCLABot_v3":
-        from bots.ucla_bot import UCLABot_v3
-        return UCLABot_v3(name=name)
-    elif name == "UCLABot_v4":
-        from bots.ucla_bot_v4 import UCLABot_v4
-        return UCLABot_v4(name=name)
-    elif name == "UCLABot_v5":
-        from bots.ucla_bot_v5 import UCLABot_v5
-        return UCLABot_v5(name=name)
-    elif name == "UCLABot_v6":
-        from bots.ucla_bot_v6 import UCLABot_v6
-        return UCLABot_v6(name=name)
-    elif name == "UCLAGreedyBot":
-        from bots.ucla_bot_heuristic import UCLAGreedyBot
-        return UCLAGreedyBot(name=name)
-    elif name == "UCLAAlphaBeta":
-        from bots.ucla_alpha_beta import UCLAAlphaBeta
-        return UCLAAlphaBeta(name=name)
-    elif name == "UCLA_MCTS_0.1":
-        from bots.ucla_mcts import UCLAMCTSBot
-        return UCLAMCTSBot(name=name, time_limit=0.1)
-    elif name == "UCLA_MCTS_0.2":
-        from bots.ucla_mcts import UCLAMCTSBot
-        return UCLAMCTSBot(name=name, time_limit=0.2)
-    elif name == "UCLA_MCTS_0.5":
-        from bots.ucla_mcts import UCLAMCTSBot
-        return UCLAMCTSBot(name=name, time_limit=0.5)
-    elif name == "SimpleBot":
-        from bots.simple_bot import SimpleBot
-        return SimpleBot(name=name)
-    elif name == "SimpleBot_v2":
-        from bots.simple_bot_v2 import SimpleBot_v2
-        return SimpleBot_v2(name=name)
-    elif name == "ARM_bot":
-        from bots.arm_bot import ArmandoBot
-        return ArmandoBot(name=name, ply=2)
-    elif name == "fill_bot":
-        from bots.fill_bot import FillBot
-        return FillBot(name=name)
-    else:
-        raise ValueError(f"Unknown agent name: {name}")
+from util import create_agent, RandomAgent
 
 def run_single_matchup(args):
     agent1_name, agent2_name, size, num_games = args
@@ -128,6 +27,13 @@ def run_single_matchup(args):
     
     # Initialize agents inside the worker process
     print()
+
+    # Prevent PyTorch from spawning multiple OpenMP threads per worker.
+    try:
+        import torch
+        torch.set_num_threads(1)
+    except ImportError:
+        pass
     
     a1_wins = 0
     a2_wins = 0
@@ -149,19 +55,25 @@ def run_single_matchup(args):
         
         game_moves = []
         game_policies = []
+        last_move = None
         
         while game.is_running():
             if game.current_player == 1:
                 start_t = time.time()
+                if last_move is not None and hasattr(agent1, '_last_action'):
+                    agent1._last_action = last_move
                 move = agent1.get_move(game)
                 a1_time += (time.time() - start_t)
                 a1_moves += 1
             else:
                 start_t = time.time()
+                if last_move is not None and hasattr(agent2, '_last_action'):
+                    agent2._last_action = last_move
                 move = agent2.get_move(game)
                 a2_time += (time.time() - start_t)
                 a2_moves += 1
             
+            last_move = move
             game_moves.append(int(move))
             dummy_pi = [0.0] * game.N_LINES
             dummy_pi[move] = 1.0
@@ -249,7 +161,11 @@ def main():
         # "UCLA_MCTS_0.5",
         #"UCLA_MCTS_0.2",
         # "ARM_bot",
-        #"fill_bot"
+        #"fill_bot",
+        "AlphaZero_0",
+        "AlphaZero_100",
+        "AlphaZero_200",
+        "AlphaZero_500",
 
     ]
     n_agents = len(agent_names)

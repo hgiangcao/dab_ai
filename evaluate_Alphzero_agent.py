@@ -19,135 +19,11 @@ except ImportError:
 from agent_interface import BaseAgent
 from game import DotsAndBoxesGame
 
-# Import bots from tournament.py list
-from bots.greedy import GreedyPlayer
-from bots.greedy_improve import GreedyChainPlayer
-from bots.ucla_bot import UCLABot, UCLABot_v2, UCLABot_v3
-from bots.ucla_bot_heuristic import UCLAGreedyBot
-from bots.ucla_alpha_beta import UCLAAlphaBeta
-from bots.ucla_mcts import UCLAMCTSBot
+from util import create_agent, RandomAgent
 
-from bots.simple_bot import SimpleBot
-from bots.mcts_x import MCTSGAgent
 
-class RandomAgent(BaseAgent):
-    def __init__(self, name: str = "Random"):
-        super().__init__(name)
 
-    def get_move(self, game_state) -> int:
-        valid_moves = game_state.get_valid_moves()
-        if not valid_moves:
-            return None
-        return random.choice(valid_moves)
 
-_nnet_cache = {}
-
-class AlphaZeroAgent(BaseAgent):
-    def __init__(self, name: str = "AlphaZero", n_simulations=200, model_path="best.pth.tar"):
-        super().__init__(name)
-        import torch
-        import config
-        from model import NNetWrapper, dotdict
-        from mcts import MCTS
-        
-        self.eval_args = dotdict({
-            'lr': config.LEARNING_RATE,
-            'epochs': config.EPOCHS,
-            'batch_size': config.BATCH_SIZE,
-            'num_channels': 256,
-            'num_res_blocks': 10, 
-            'l2_reg': 1e-4,
-            'n_simulations': n_simulations,
-            'c_puct': config.MCTS_C_PUCT,
-            'dirichlet_eps': 0.0,
-            'dirichlet_alpha': config.MCTS_DIRICHLET_ALPHA,
-            'device': 'cpu'
-        })
-        
-        global _nnet_cache
-        if model_path not in _nnet_cache:
-            self.game_ref = DotsAndBoxesGame(size=5)
-            net = NNetWrapper(self.game_ref, self.eval_args)
-            if os.path.exists(model_path):
-                try:
-                    state = torch.load(model_path, map_location='cpu', weights_only=False)
-                    net.nnet.load_state_dict(state['state_dict'] if 'state_dict' in state else state)
-                    print(f"Loaded AlphaZero model from {model_path}")
-                except Exception as e:
-                    print(f"Error loading model from {model_path}: {e}")
-            else:
-                print(f"Warning: AlphaZero model not found at {model_path}")
-            net.nnet.eval()
-            _nnet_cache[model_path] = net
-            
-        self.net = _nnet_cache[model_path]
-        self.mcts = MCTS(self.net, self.eval_args)
-        self._last_action: int = None
-
-    def reset(self):
-        """Reset MCTS tree. Must be called at the start of each new game."""
-        self.mcts.reset_tree()
-        self._last_action = None
-
-    def get_move(self, game_state: DotsAndBoxesGame) -> int:
-        pi = self.mcts.play(game_state, temp=0, last_action=self._last_action)
-        action = int(np.argmax(pi))
-        self._last_action = action
-        return action
-
-def create_agent(name: str, size: int, model_path: str = "best.pth.tar", n_simulations: int = 200):
-    if name == "Random":
-        return RandomAgent()
-    elif name == "AlphaZero":
-        return AlphaZeroAgent(n_simulations=n_simulations, model_path=model_path)
-    elif name == "AlphaZero_500":
-        return AlphaZeroAgent(n_simulations=500, model_path=model_path)
-    elif name == "AlphaZero_1000":
-        return AlphaZeroAgent(n_simulations=1000, model_path=model_path)
-    elif name == "AlphaZero_300":
-        return AlphaZeroAgent(n_simulations=300, model_path=model_path)
-    elif name == "AlphaZero_200":
-        return AlphaZeroAgent(n_simulations=200, model_path=model_path)
-    elif name == "AlphaZero_100":
-        return AlphaZeroAgent(n_simulations=100, model_path=model_path)
-    elif name == "AlphaZero_0":
-        return AlphaZeroAgent(n_simulations=0, model_path=model_path)
-    elif name == "MCTS (100sims)":
-        return MCTSGAgent(name=name, n_simulations=100)
-    elif name == "MCTS (200sims)":
-        return MCTSGAgent(name=name, n_simulations=200)
-    elif name == "MCTS (300sims)":
-        return MCTSGAgent(name=name, n_simulations=300)
-    elif name == "Greedy":
-        return GreedyPlayer(name=name)
-    elif name == "Greedy Chain":
-        return GreedyChainPlayer(name=name)
-    elif name == "UCLABot":
-        return UCLABot(name=name)
-    elif name == "UCLABot_v2":
-        return UCLABot_v2(name=name)
-    elif name == "UCLABot_v3":
-        return UCLABot_v3(name=name)
-    elif name == "UCLAGreedyBot":
-        return UCLAGreedyBot(name=name)
-    elif name == "UCLAAlphaBeta":
-        return UCLAAlphaBeta(name=name)
-    elif name == "UCLA_MCTS_0.1":
-        from bots.ucla_mcts import UCLAMCTSBot
-        return UCLAMCTSBot(name=name, time_limit=0.1)
-    elif name == "UCLA_MCTS_0.2":
-        from bots.ucla_mcts import UCLAMCTSBot
-        return UCLAMCTSBot(name=name, time_limit=0.2)
-    elif name == "SimpleBot":
-        return SimpleBot(name=name)
-    elif name == "SimpleBot_v2":
-        from bots.simple_bot_v2 import SimpleBotV2
-        return SimpleBotV2(name=name)
-    elif name == "UCLABot_v6":
-        from bots.ucla_bot_v6 import UCLABot_v6
-        return UCLABot_v6(name=name)
-    else:
-        raise ValueError(f"Unknown agent name: {name}")
 
 def run_single_game(args):
     agent1_name, agent2_name, size, game_index, model_path, n_simulations = args
@@ -243,7 +119,7 @@ def main():
         "AlphaZero_100",
         "AlphaZero_200",
         "AlphaZero_300",
-        "AlphaZero_0",
+        "AlphaZero_500",
     ]
 
     tasks = []

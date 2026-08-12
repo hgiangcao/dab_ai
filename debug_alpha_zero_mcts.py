@@ -6,7 +6,7 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, PROJECT_ROOT)
 
 from game import DotsAndBoxesGame
-from evaluate_Alphzero_agent import AlphaZeroAgent
+from bots.alphazero_agent import AlphaZeroAgent
 
 def main():
     sim_counts = [0, 100, 200, 300, 500, 1000]

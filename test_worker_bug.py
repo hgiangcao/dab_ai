@@ -15,7 +15,7 @@ def run_test():
         ] * 10
         
         import torch
-        from evaluate_Alphzero_agent import AlphaZeroAgent
+        from bots.alphazero_agent import AlphaZeroAgent
         from model import NNetWrapper, dotdict
         from mcts import MCTS
         
