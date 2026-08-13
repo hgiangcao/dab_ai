@@ -170,7 +170,13 @@ def worker_execute_episode_chunk(worker_args):
             def agent_opp(g, t):
                 pi = mcts_opp.play(g, temp=t, add_root_noise=True)
                 return pi, mcts_opp.max_depth_reached
-            agent_opp.reset = lambda: None
+                
+            def reset_opp():
+                import random
+                mcts_opp.dynamic_simulations = random.choice([True, False])
+                mcts_opp.random_simulation = random.choice([True, False])
+                
+            agent_opp.reset = reset_opp
 
         elif opp_type == "alpha_beta_0.1s":
             from bots.alpha_beta import AlphaBetaPlayer

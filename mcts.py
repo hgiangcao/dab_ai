@@ -46,6 +46,8 @@ class MCTS:
         #   move ≥ 45          → 0.5×  (endgame: position usually forced)
         # Disabled by default; enable with dynamic_simulations=True.
         self.dynamic_simulations = mcts_parameters.get("dynamic_simulations", False)
+        # Randomize simulation count by ±0-20% to increase exploration variety
+        self.random_simulation = mcts_parameters.get("random_simulation", False)
         # Tree reuse: keep the root node between play() calls.
         # After each move is chosen we advance _root to the chosen child,
         # so all simulations done on that subtree are immediately available
@@ -165,6 +167,12 @@ class MCTS:
                 if self.dynamic_simulations
                 else self.n_simulations
             )
+            
+            if self.random_simulation:
+                import random
+                variance = random.uniform(-0.2, 0.2)
+                n_sims = max(1, int(n_sims * (1 + variance)))
+
             for sim_idx in range(n_sims):
                 self.search(root, is_root=True, dirichlet_noise=dirichlet_noise, current_depth=0)
 
