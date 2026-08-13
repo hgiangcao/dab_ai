@@ -311,8 +311,11 @@ def evaluate_new_model(iteration=None):
     
     if updated_best:
         model_manager.update_best()
-        model_manager.set_best_overall_score(overall_bot_score)
-        model_manager.set_best_min_bot_winrate(candidate_min_wr)
+        
+        if overall_bot_score > stored_best_score:
+            model_manager.set_best_overall_score(overall_bot_score)
+            model_manager.set_best_min_bot_winrate(candidate_min_wr)
+            
         print(f"[Eval] best.pth.tar updated. New best score: {overall_bot_score:.4f}, min bot WR: {candidate_min_wr:.4f}")
 
     print("="*60 + "\n")
