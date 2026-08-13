@@ -49,12 +49,12 @@ EVAL_GAMES_VS_BOTS    = 40   # games vs each external bot during screening
 EVAL_GAMES_VS_CURRENT = 50   # games vs current/self checkpoint during screening
 
 # Promotion: BOTH conditions must pass
-PROMOTION_BOT_SCORE_RATIO = 0.80       # candidate_overall_bot_score >= this * best_overall_bot_score
+PROMOTION_BOT_SCORE_RATIO = 0.95       # candidate_overall_bot_score >= this * best_overall_bot_score
 MIN_WINRATE_VS_CURRENT        = 0.55   # winrate vs current checkpoint threshold
 
 # Best-model update: candidate qualifies when its overall bot score is at least
 # this fraction of the stored best score
-BEST_UPDATE_SCORE_RATIO = 0.90
+BEST_UPDATE_SCORE_RATIO = 0.95
 
 # Legacy (kept for evaluator backward compat, no longer used for promotion)
 EVAL_GAMES = 50

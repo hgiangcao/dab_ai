@@ -42,7 +42,7 @@ def startup_event():
     next_run = f"run_{max_run + 1}"
     
     # 2. Force a fresh version.txt for the new run
-    VERSION_FILE.write_text(f"run: {next_run}\nlast_updated_model: 0\ncurrent_phase: 0\nfinish_pretrain: False\n")
+    VERSION_FILE.write_text(f"run: {next_run}\nlast_updated_model: 0\ncurrent_phase: 0\nfinish_pretrain: False\nbest_model_checkpoint: 0\n")
     print(f"\n===========================================================")
     print(f"SERVER STARTING NEW EXPERIMENT: {next_run}")
     print(f"===========================================================\n")

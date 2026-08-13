@@ -303,13 +303,12 @@ def evaluate_new_model(iteration=None):
     stored_best_min_bot_wr = model_manager.get_best_min_bot_winrate()
     candidate_min_wr = min(bot_win_rates.values()) if bot_win_rates else 0.0
 
-    updated_best = (overall_bot_score >= best_threshold) and (candidate_min_wr >= stored_best_min_bot_wr)
+    updated_best = (overall_bot_score >= best_threshold) 
 
     print(f"\n  Best update check: candidate score {overall_bot_score:.4f} >= "
           f"{config.BEST_UPDATE_SCORE_RATIO:.0%} × stored best {stored_best_score:.4f} "
           f"= {best_threshold:.4f}")
-    print(f"  AND candidate min WR {candidate_min_wr:.4f} >= stored min WR {stored_best_min_bot_wr:.4f}  →  {'UPDATE BEST' if updated_best else 'keep old best'}")
-
+    
     if updated_best:
         model_manager.update_best()
         model_manager.set_best_overall_score(overall_bot_score)

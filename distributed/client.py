@@ -30,6 +30,18 @@ class ServerClient:
             for chunk in r.iter_content(8192):
                 f.write(chunk)
 
+    def download_best_model(self, save_path):
+
+        r = requests.get(
+            self.server + "/best_model",
+            stream=True
+        )
+        r.raise_for_status()
+
+        with open(save_path, "wb") as f:
+            for chunk in r.iter_content(8192):
+                f.write(chunk)
+
     def upload_replay(self, filename, model_version=0):
         with open(filename, "rb") as f:
             requests.post(

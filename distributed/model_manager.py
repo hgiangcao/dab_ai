@@ -93,6 +93,16 @@ def set_best_min_bot_winrate(score: float):
     _write_version_field("best_min_bot_winrate", f"{score:.6f}")
 
 
+def get_best_model_checkpoint() -> int:
+    """Return the last_updated_model version when best.pth.tar was last updated."""
+    return _read_version_field("best_model_checkpoint", 0)
+
+
+def set_best_model_checkpoint(version: int):
+    """Persist which checkpoint number corresponds to the current best.pth.tar."""
+    _write_version_field("best_model_checkpoint", version)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Checkpoint path helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -208,6 +218,7 @@ def update_best():
     Update best.pth.tar to the current candidate.
     Called independently from promote_to_current when the candidate
     scores >= BEST_UPDATE_SCORE_RATIO × current best score.
+    Also records the current last_updated_model version as best_model_checkpoint.
     """
     candidate = get_candidate_path()
     best_path = get_best_model_path()
@@ -215,7 +226,9 @@ def update_best():
 
     if os.path.exists(candidate):
         shutil.copyfile(candidate, best_path)
-        print(f"[ModelManager] Updated best.pth.tar from candidate.")
+        current_version = get_current_version()
+        set_best_model_checkpoint(current_version)
+        print(f"[ModelManager] Updated best.pth.tar from candidate (checkpoint v{current_version}).")
     else:
         print(f"[ModelManager] WARNING: candidate not found, best.pth.tar not updated.")
 

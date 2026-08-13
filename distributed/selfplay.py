@@ -52,12 +52,17 @@ class SelfPlayGenerator:
             'device': 'cpu'  # Workers use CPU for highly parallel self-play
         })
         self.latest_model_path = None
+        self.best_model_path = None
         
         print(f"SelfPlayGenerator initialized. (Size: {self.game_size}x{self.game_size})")
  
     def load_model(self, checkpoint):
         """Loads the path to the latest model to be used by the multiprocessing workers."""
         self.latest_model_path = os.path.abspath(checkpoint)
+ 
+    def load_best_model(self, checkpoint):
+        """Loads the path to the best model (opponent type 'best') for workers."""
+        self.best_model_path = os.path.abspath(checkpoint)
  
     def play_games(self, num_games, save_dir, worker_id="worker", model_version=0, current_phase=0):
         print(f"version {model_version} - Starting generation of {num_games} games at Phase {current_phase}...")
@@ -68,6 +73,8 @@ class SelfPlayGenerator:
         total_prob = sum(p for _, p in current_pool)
         normalized_probs = [p / total_prob for _, p in current_pool]
         
+
+        main_model_path = self.best_model_path if self.best_model_path and os.path.exists(self.best_model_path) else self.latest_model_path
 
         # 3. Setup episode specs for chunked multiprocessing
         loss_games = []
@@ -88,7 +95,7 @@ class SelfPlayGenerator:
         for i in range(num_games):
             if i < n_loss_game:
                 lg = loss_games[i]
-                opp_type = lg.get("opp_type", "self")
+                opp_type = lg.get("opp_type", "best")
                 opp_path = lg.get("opp_path", None)
                 prefilled_moves = lg.get("moves", [])
             else:
@@ -96,10 +103,15 @@ class SelfPlayGenerator:
                 opp_path = None
                 prefilled_moves = None
                 
-            # Workers don't necessarily have server's "best" or "past" checkpoints readily available.
-            # Revert them to "self" to guarantee execution.
-            if opp_type in ["best", "past"]:
+            # 'best' is now the main agent (mirror match).
+            # 'self' is the latest checkpoint (loaded as opponent).
+            if opp_type == "best":
+                opp_path = None
+            elif opp_type == "self":
+                opp_path = self.latest_model_path
+            elif opp_type == "past":
                 opp_type = "self"
+                opp_path = self.latest_model_path
                 
             if prefilled_moves is not None:
                 episode_specs.append((opp_type, opp_path, prefilled_moves))
@@ -116,7 +128,7 @@ class SelfPlayGenerator:
         max_workers = max(1, min(config.MAX_WORKERS, multiprocessing.cpu_count() - 1))
         worker_args_list = build_worker_chunks(
             self.game_size,
-            self.latest_model_path,
+            main_model_path,
             MCTS,
             self.args,
             episode_specs,
@@ -128,7 +140,7 @@ class SelfPlayGenerator:
 
         print(f"Using {len(worker_args_list)} self-play worker processes for {len(episode_specs)} games.")
         executor = get_selfplay_executor(
-            self.latest_model_path,
+            main_model_path,
             MCTS,
             self.args,
             self.game_size,
