@@ -98,6 +98,7 @@ def main():
     parser.add_argument("--output", type=str, default="alphazero_evaluation.png", help="Path to export the results visualization PNG (default: alphazero_evaluation.png).")
     parser.add_argument("--run", type=str, default=None, help="The run subdirectory name under logs (e.g. run_1) to load best.pth.tar from. If not specified, loads from project root.")
     parser.add_argument("--mcts_sims", type=int, default=200, help="Number of simulations for AlphaZero MCTS (default: 200).")
+    parser.add_argument("--dynamic_sims", type=str, default="False", help="Enable dynamic simulation scaling in AlphaZero (phase-adaptive).")
     args = parser.parse_args()
 
     import config
@@ -106,20 +107,25 @@ def main():
     else:
         model_path = "best.pth.tar"
 
+    # Build the canonical AlphaZero agent name used by create_agent()
+    dynamic_sims = args.dynamic_sims.strip().lower() in ("true", "1", "yes")
+    sim_suffix = "D" if dynamic_sims else "F"
+    az_name = f"AlphaZero_{args.mcts_sims}_{sim_suffix}"
+
     opponent_names = [
         # "Random",
-        # "Greedy", 
-        # "Greedy Chain",
-        # "UCLABot_v3",
+        "Greedy", 
+        #"Greedy Chain",
+        #"UCLABot_v3",
         "UCLABot_v6",
         # "SimpleBot",
         # "SimpleBot_v2",
         # "UCLA_MCTS_0.1",
         # "UCLA_MCTS_0.2",
-        "AlphaZero_100",
-        "AlphaZero_200",
-        "AlphaZero_300",
-        "AlphaZero_500",
+        # "AlphaZero_100",
+        "AlphaZero_200_F",
+        "AlphaZero_300_F",
+        "AlphaZero_500_F",
     ]
 
     tasks = []
@@ -127,15 +133,16 @@ def main():
     # Tasks are parallelized per individual game
     for opp in opponent_names:
         for game_idx in range(args.games):
-            tasks.append(("AlphaZero", opp, args.size, game_idx, model_path, args.mcts_sims))
+            tasks.append((az_name, opp, args.size, game_idx, model_path, args.mcts_sims))
 
     num_cores = args.workers if args.workers is not None else max(1, mp.cpu_count() - 1)
-    print(f"Starting AlphaZero evaluation (parallelized per game) against {len(opponent_names)} bots (size={args.size}x{args.size}, games={args.games} per matchup).")
+    print(f"Starting evaluation: {az_name} vs {len(opponent_names)} bots "
+          f"(size={args.size}x{args.size}, games={args.games} per matchup).")
     print(f"Running on {num_cores} worker processes...")
-    
+
     matchup_stats = {opp: {"wins": 0, "losses": 0, "draws": 0} for opp in opponent_names}
-    agent_moves = {name: 0 for name in ["AlphaZero"] + opponent_names}
-    agent_time = {name: 0.0 for name in ["AlphaZero"] + opponent_names}
+    agent_moves = {name: 0 for name in [az_name] + opponent_names}
+    agent_time = {name: 0.0 for name in [az_name] + opponent_names}
     
     with mp.Pool(num_cores) as pool:
         pbar = tqdm(pool.imap_unordered(run_single_game, tasks), total=len(tasks), desc="Running Games")
@@ -161,15 +168,15 @@ def main():
 
     # Print move speed results to stdout
     print("\n--- Move Speed Report (moves/second) ---")
-    for name in ["AlphaZero"] + opponent_names:
+    for name in [az_name] + opponent_names:
         m_count = agent_moves[name]
         total_t = agent_time[name]
         mps = m_count / total_t if total_t > 0 else 0.0
         print(f"{name:<20} | Moves: {m_count:<6} | Total Time: {total_t:<8.3f}s | Moves/Sec: {mps:.2f}")
     print("-" * 60)
 
-    print("\n--- AlphaZero Evaluation Results ---")
-    print(f"{'Opponent':<20} | {'AlphaZero Win Rate':<20} | {'Wins':<6} | {'Losses':<6} | {'Draws':<6}")
+    print(f"\n--- {az_name} Evaluation Results ---")
+    print(f"{'Opponent':<20} | {'Win Rate':<20} | {'Wins':<6} | {'Losses':<6} | {'Draws':<6}")
     print("-" * 68)
     
     opponents_for_plot = []
@@ -189,7 +196,7 @@ def main():
     plt.ylim(0, 1.05)
     plt.ylabel('AlphaZero Win Rate')
     plt.xlabel('Opponent Bot')
-    plt.title(f'AlphaZero ({args.mcts_sims} Sims) vs. Other Bots ({args.games} Games, Size {args.size}x{args.size})')
+    plt.title(f'{az_name} vs. Other Bots ({args.games} Games, Size {args.size}x{args.size})')
     plt.legend()
     
     for bar in bars:

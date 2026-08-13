@@ -30,6 +30,22 @@ class MCTS:
         self.dirichlet_alpha = mcts_parameters.get("dirichlet_alpha", 0.0)
         self.time_limit = mcts_parameters.get("time_limit", None)
         self.max_depth_reached = 0
+        # --- Early stopping parameters ---
+        # Mathematical dominance: stop when N1 > N2 + N_remaining
+        self.early_stop_dominance = mcts_parameters.get("early_stop_dominance", True)
+        # Dynamic uncertainty: stop when N2/N1 < epsilon after min_sims simulations
+        self.early_stop_entropy = mcts_parameters.get("early_stop_entropy", True)
+        self.early_stop_entropy_eps = mcts_parameters.get("early_stop_entropy_eps", 0.02)
+        self.early_stop_min_sims = mcts_parameters.get("early_stop_min_sims", 50)
+        # --- Dynamic simulation scaling parameters ---
+        # When enabled, n_simulations is multiplied by a phase-dependent factor
+        # determined by the total number of moves already played on the board:
+        #   move < 25          → 0.5×  (opening: save budget)
+        #   25 ≤ move < 35     → 2.0×  (mid-game spike: critical decisions)
+        #   35 ≤ move < 45     → 1.5×  (late-mid: still important)
+        #   move ≥ 45          → 0.5×  (endgame: position usually forced)
+        # Disabled by default; enable with dynamic_simulations=True.
+        self.dynamic_simulations = mcts_parameters.get("dynamic_simulations", False)
         # Tree reuse: keep the root node between play() calls.
         # After each move is chosen we advance _root to the chosen child,
         # so all simulations done on that subtree are immediately available
@@ -39,6 +55,31 @@ class MCTS:
     def reset_tree(self):
         """Discard the cached tree (call at the start of every new game)."""
         self._root = None
+
+    def _get_dynamic_n_simulations(self, game_state) -> int:
+        """
+        Return the effective simulation budget for this move, scaled by the
+        current game phase (total lines already drawn on the board).
+
+        Phase schedule (total moves played):
+            < 25       → 0.50 × n_simulations  (opening)
+            25 – 34    → 2.00 × n_simulations  (critical mid-game)
+            35 – 44    → 1.50 × n_simulations  (late mid-game)
+            ≥ 45       → 0.50 × n_simulations  (endgame / forced)
+        """
+        # Count drawn lines directly from the game-state array (no extra API needed)
+        total_moves = int((game_state.l != 0).sum())
+
+        if total_moves < 25:
+            scale = 0.2
+        elif total_moves < 35:
+            scale = 2.0
+        elif total_moves < 45:
+            scale = 1.5
+        else:
+            scale = 0.2
+
+        return max(1, int(self.n_simulations * scale))
 
     def _advance_root(self, last_action: int, game_state) -> AZNode:
         """
@@ -118,8 +159,41 @@ class MCTS:
             while time.time() - start_time < self.time_limit:
                 self.search(root, is_root=True, dirichlet_noise=dirichlet_noise, current_depth=0)
         else:
-            for _ in range(self.n_simulations):
+            # Resolve effective simulation budget for this move
+            n_sims = (
+                self._get_dynamic_n_simulations(game_state)
+                if self.dynamic_simulations
+                else self.n_simulations
+            )
+            for sim_idx in range(n_sims):
                 self.search(root, is_root=True, dirichlet_noise=dirichlet_noise, current_depth=0)
+
+                # --- Early stopping (only meaningful when ≥2 moves exist) ---
+                if root.valid_moves is not None and len(root.valid_moves) >= 2:
+                    # Collect the two highest visit counts in a single pass
+                    n1 = n2 = 0
+                    for a in root.valid_moves:
+                        n = root.N.get(a, 0)
+                        if n > n1:
+                            n2, n1 = n1, n
+                        elif n > n2:
+                            n2 = n
+
+                    sims_done = sim_idx + 1
+                    n_remaining = n_sims - sims_done
+
+                    # 1. Mathematical dominance: N1 > N2 + N_remaining
+                    #    Even giving all remaining budget to the runner-up, it can't overtake.
+                    if self.early_stop_dominance and n1 > n2 + n_remaining:
+                        break
+
+                    # 2. Dynamic uncertainty / entropy threshold: N2/N1 < epsilon
+                    #    The search has converged; the second-best move is negligible.
+                    if (self.early_stop_entropy
+                            and sims_done >= self.early_stop_min_sims
+                            and n1 > 0
+                            and n2 / n1 < self.early_stop_entropy_eps):
+                        break
 
         counts = np.array([root.N.get(a, 0) for a in range(root.s.N_LINES)], dtype=np.float64)
         counts_sum = float(counts.sum())

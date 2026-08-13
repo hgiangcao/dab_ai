@@ -6,7 +6,8 @@ from game import DotsAndBoxesGame
 _nnet_cache = {}
 
 class AlphaZeroAgent(BaseAgent):
-    def __init__(self, name: str = "AlphaZero", n_simulations=200, model_path="best.pth.tar"):
+    def __init__(self, name: str = "AlphaZero", n_simulations=200, model_path="best.pth.tar",
+                 dynamic_simulations: bool = False):
         super().__init__(name)
         import torch
         import config
@@ -24,7 +25,8 @@ class AlphaZeroAgent(BaseAgent):
             'c_puct': config.MCTS_C_PUCT,
             'dirichlet_eps': 0.0,
             'dirichlet_alpha': config.MCTS_DIRICHLET_ALPHA,
-            'device': 'cpu'
+            'device': 'cpu',
+            'dynamic_simulations': dynamic_simulations,
         })
         
         global _nnet_cache

@@ -58,6 +58,22 @@ def run_single_matchup(args):
         last_move = None
         
         while game.is_running():
+            total_moves = len(game_moves)
+            if total_moves < 4:
+                move = random.choice(game.get_valid_moves())
+                if game.current_player == 1:
+                    a1_moves += 1
+                else:
+                    a2_moves += 1
+                
+                last_move = move
+                game_moves.append(int(move))
+                dummy_pi = [0.0] * game.N_LINES
+                dummy_pi[move] = 1.0
+                game_policies.append(dummy_pi)
+                game.execute_move(move)
+                continue
+
             if game.current_player == 1:
                 start_t = time.time()
                 if last_move is not None and hasattr(agent1, '_last_action'):
@@ -163,7 +179,7 @@ def main():
         # "ARM_bot",
         #"fill_bot",
         "AlphaZero_0",
-        "AlphaZero_100",
+        # "AlphaZero_100",
         "AlphaZero_200",
         "AlphaZero_500",
 

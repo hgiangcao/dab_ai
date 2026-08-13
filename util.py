@@ -69,19 +69,18 @@ def create_agent(name: str, size: int, model_path: str = "best.pth.tar", n_simul
         from bots.alphazero_agent import AlphaZeroAgent
         if name == "AlphaZero":
             return AlphaZeroAgent(name=name, n_simulations=n_simulations, model_path=model_path)
-        elif name == "AlphaZero_0":
-            return AlphaZeroAgent(name=name, n_simulations=0, model_path=model_path)
-        elif name == "AlphaZero_100":
-            return AlphaZeroAgent(name=name, n_simulations=100, model_path=model_path)
-        elif name == "AlphaZero_200":
-            return AlphaZeroAgent(name=name, n_simulations=200, model_path=model_path)
-        elif name == "AlphaZero_300":
-            return AlphaZeroAgent(name=name, n_simulations=300, model_path=model_path)
-        elif name == "AlphaZero_500":
-            return AlphaZeroAgent(name=name, n_simulations=500, model_path=model_path)
-        elif name == "AlphaZero_1000":
-            return AlphaZeroAgent(name=name, n_simulations=1000, model_path=model_path)
         else:
+            # Pattern: AlphaZero_<N>_D  (dynamic sims)
+            #          AlphaZero_<N>_F  (fixed sims)
+            #          AlphaZero_<N>    (legacy fixed, no suffix)
+            import re
+            m = re.fullmatch(r"AlphaZero_(\d+)(?:_(D|F))?", name)
+            if m:
+                n_sims = int(m.group(1))
+                dynamic = (m.group(2) == "D")
+                return AlphaZeroAgent(name=name, n_simulations=n_sims,
+                                      model_path=model_path,
+                                      dynamic_simulations=dynamic)
             return AlphaZeroAgent(name=name, model_path=model_path)
     elif name == "MCTS (100sims)":
         from bots.mcts_x import MCTSGAgent
