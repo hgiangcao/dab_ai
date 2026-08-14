@@ -72,14 +72,14 @@ class MCTS:
         # Count drawn lines directly from the game-state array (no extra API needed)
         total_moves = int((game_state.l != 0).sum())
 
-        if total_moves < 25:
-            scale = 0.2
-        elif total_moves < 35:
+        if total_moves < 15:
+            scale = 0.5
+        elif total_moves < 40:
             scale = 2.0
-        elif total_moves < 45:
+        elif total_moves < 50:
             scale = 1.5
         else:
-            scale = 0.2
+            scale = 1
 
         return max(1, int(self.n_simulations * scale))
 

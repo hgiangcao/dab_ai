@@ -114,18 +114,18 @@ def main():
 
     opponent_names = [
         # "Random",
-        "Greedy", 
+        # "Greedy", 
         #"Greedy Chain",
         #"UCLABot_v3",
-        "UCLABot_v6",
+        # "UCLABot_v6",
         # "SimpleBot",
         # "SimpleBot_v2",
         # "UCLA_MCTS_0.1",
         # "UCLA_MCTS_0.2",
         # "AlphaZero_100",
-        "AlphaZero_200_F",
+        # "AlphaZero_200_F",
         "AlphaZero_300_F",
-        "AlphaZero_500_F",
+        # "AlphaZero_500_F",
     ]
 
     tasks = []
