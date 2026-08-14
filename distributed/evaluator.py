@@ -38,6 +38,8 @@ eval_args = dotdict({
     'num_res_blocks': 10,
     'l2_reg': 1e-4,
     'n_simulations': config.MCTS_NUM_SIMULATIONS,
+    'dynamic_simulations': False,  # Force fixed simulations for evaluation
+    'random_simulation': False,    # Force fixed simulations for evaluation
     'c_puct': config.MCTS_C_PUCT,
     'dirichlet_eps': 0.0,        # no noise during evaluation
     'dirichlet_alpha': config.MCTS_DIRICHLET_ALPHA,
