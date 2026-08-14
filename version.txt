@@ -1,7 +1,7 @@
-run: run_90
-last_updated_model: 8
+run: run_91
+last_updated_model: 2
 current_phase: 7
 finish_pretrain: True
-best_model_checkpoint: 8
-best_overall_score: 0.950000
-best_min_bot_winrate: 0.925000
+best_model_checkpoint: 2
+best_overall_score: 0.983333
+best_min_bot_winrate: 0.975000

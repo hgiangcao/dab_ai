@@ -124,8 +124,10 @@ def main():
         # "UCLA_MCTS_0.2",
         # "AlphaZero_100",
         # "AlphaZero_200_F",
-        "AlphaZero_300_F",
-        # "AlphaZero_500_F",
+        # "AlphaZero_300_F",
+        "AlphaZero_200_D",
+        "AlphaZero_200_D_R",
+        "AlphaZero_200_F_R",
     ]
 
     tasks = []

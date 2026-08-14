@@ -45,7 +45,7 @@ class MCTS:
         #   35 ≤ move < 45     → 1.5×  (late-mid: still important)
         #   move ≥ 45          → 0.5×  (endgame: position usually forced)
         # Disabled by default; enable with dynamic_simulations=True.
-        self.dynamic_simulations = mcts_parameters.get("dynamic_simulations", False)
+        self.dynamic_simulations = mcts_parameters.get("dynamic_simulations", True)
         # Randomize simulation count by ±0-20% to increase exploration variety
         self.random_simulation = mcts_parameters.get("random_simulation", False)
         # Tree reuse: keep the root node between play() calls.
